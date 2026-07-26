@@ -19,6 +19,7 @@ cleanup_targets = [
     project_root / "build",
     project_root / "dist",
     project_root / "MZ0000_FlowchartTool_rev014.spec",
+    project_root / "FlowchartExcel.spec",
     
     # Pythonキャッシュ
     project_root / "__pycache__",

@@ -11,15 +11,17 @@ os.chdir(script_dir)
 
 pyinstaller_cmd = [
     "pyinstaller",
+    "--noconfirm",
     "--onefile",
     "--windowed",
     "--name=FlowchartExcel",
-    "--icon=NONE",
+    # customtkinter のテーマ／アセットを同梱（欠けると exe 起動失敗しやすい）
+    "--collect-all=customtkinter",
     "main.py",
 ]
 
 print("=" * 60)
-print("Flowchart Excel — PyInstaller build")
+print("Flowchart Excel - PyInstaller build")
 print("=" * 60)
 print(f"cwd: {script_dir}")
 print(f"cmd: {' '.join(pyinstaller_cmd)}")
