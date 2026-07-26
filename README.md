@@ -24,10 +24,13 @@ Excel 上の **10列表** から AutoShape フローチャートを生成する 
 
 キャンセルすれば Excel には何も書きません。スマート・パレット（単体図形）はプレビュー対象外です。
 
-初回またはプレビュー更新後は `preview-web` のビルドが必要です。
+初回またはプレビュー更新後は `preview-web` のビルドが必要です。  
+`preview-web` は隣接の `flowchart-studio` を Vite alias 参照するため、**studio 側でも `npm install` が必要**です。
 
 ```powershell
-cd preview-web
+cd ..\flowchart-studio
+npm install
+cd ..\flowchart-excel\preview-web
 npm install
 npm run build
 cd ..
@@ -69,6 +72,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+`setup_venv.py` が cp932 環境で `UnicodeEncodeError`（`✓` 出力）になる場合は次で代替できます。
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
 ## テスト
 
 ```powershell
@@ -77,9 +88,16 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## ビルド（exe）
 
+前提: 上記のとおり **`flowchart-studio` と `preview-web` の両方で `npm install` 済み**であること（`build_exe.py` が内部で `npm run build` を実行する）。
+
 ```powershell
-python build_exe.py
+cd c:\yk-application\flowchart-studio
+npm install
+cd c:\yk-application\flowchart-excel
+.\.venv\Scripts\python.exe build_exe.py
 ```
+
+成果物: `dist\FlowchartExcel.exe`
 
 ## 関連ドキュメント
 
