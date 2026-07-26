@@ -74,13 +74,20 @@ export function App() {
   return (
     <div className="flex h-full flex-col bg-flow-surface-muted">
       <header className="shrink-0 border-b border-flow-border bg-flow-surface px-4 py-3">
-        <div className="text-sm font-bold text-flow-text">
-          {payload.title}（{mode}）
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-bold text-flow-text">
+            {payload.title}（{mode}）
+          </div>
+          {payload.meta?.live ? (
+            <span className="rounded border border-flow-accent/30 bg-flow-accent/10 px-2 py-0.5 text-[11px] font-medium text-flow-accent">
+              ライブ更新
+            </span>
+          ) : null}
         </div>
         <div className="mt-1 text-xs text-flow-text-muted">
           {generated?.ok
-            ? `ノード ${generated.placed.length} · 接続 ${generated.edges.length} — flowchart-studio と同じ生成・描画`
-            : "生成エラー — 表を直してやり直してください"}
+            ? `ノード ${generated.placed.length} · 接続 ${generated.edges.length} — Excel の表を直すと自動で再描画`
+            : "生成エラー — 表を直すと自動で再試行します"}
         </div>
         {errorText ? (
           <div className="mt-2 text-xs text-flow-danger">{errorText}</div>
@@ -133,7 +140,7 @@ export function App() {
 
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-flow-border bg-flow-surface px-4 py-3">
         <p className="text-xs text-flow-text-muted">
-          描画は flowchart-studio の React Flow を使用しています。
+          約0.75秒ごとに Excel を再読込します（セル編集中はスキップ）。
         </p>
         <div className="flex gap-2">
           <button

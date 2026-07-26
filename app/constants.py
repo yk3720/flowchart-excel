@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 # --- アプリケーション情報 ---
 APP_NAME = "Flowchart Excel"
-REVISION = "rev004"
+REVISION = "rev005"
 AUTHOR = "YK"
 RECOMMENDED_PYTHON = "3.14.2"
 

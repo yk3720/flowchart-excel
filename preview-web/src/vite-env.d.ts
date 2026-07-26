@@ -13,6 +13,12 @@ export type PreviewPayload = {
     baseLeft: number;
     baseTop: number;
   };
+  meta?: {
+    nodeCount?: number;
+    colCount?: number;
+    live?: boolean;
+    watch?: Record<string, unknown>;
+  };
 };
 
 export type PreviewHostApi = {

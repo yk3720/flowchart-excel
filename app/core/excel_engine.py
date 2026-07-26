@@ -72,13 +72,26 @@ class ExcelFlowchartEngine:
         config: Dict[str, Any],
     ) -> Dict[str, Any]:
         """flowchart-studio 同等プレビュー用 JSON ペイロード。"""
-        data, _sheet, _start_cell, title_txt = self._read_selection(is_full_mode)
-        return build_studio_preview_payload(
+        data, sheet, start_cell, title_txt = self._read_selection(is_full_mode)
+        sel = get_excel_app().Selection
+        r_tgt = sel.CurrentRegion if is_full_mode else sel
+        payload = build_studio_preview_payload(
             data,
             title=title_txt,
             is_full_mode=is_full_mode,
             config=config,
         )
+        meta = dict(payload.get("meta") or {})
+        meta["live"] = True
+        meta["watch"] = {
+            "isFullMode": bool(is_full_mode),
+            "workbookName": str(sheet.Parent.Name),
+            "sheetName": str(sheet.Name),
+            "anchorAddress": str(start_cell.Address),
+            "rangeAddress": str(r_tgt.Address),
+        }
+        payload["meta"] = meta
+        return payload
 
     def build_preview(
         self,
