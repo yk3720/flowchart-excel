@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: 現在のファイル",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${fileDirname}",
+            // プロジェクト内の.venvを必ず使用
+            "python": "${fileDirname}/.venv/Scripts/python.exe"
+        },
+        {
+            "name": "Python: main.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${fileDirname}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${fileDirname}",
+            // プロジェクト内の.venvを必ず使用
+            "python": "${fileDirname}/.venv/Scripts/python.exe"
+        }
+    ]
+}

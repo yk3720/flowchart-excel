@@ -1,0 +1,18 @@
+{
+    // Pythonインタープリタのパス: プロジェクト内の.venvを必ず参照
+    // ${fileDirname}は現在開いているファイルのディレクトリを指すため、
+    // プロジェクトルート（.vscodeの親ディレクトリ）からの相対パスで指定
+    "python.defaultInterpreterPath": "${fileDirname}/.venv/Scripts/python.exe",
+    
+    // 仮想環境を自動アクティベート
+    "python.terminal.activateEnvironment": true,
+    
+    // ターミナルでファイルのディレクトリで実行
+    "python.terminal.executeInFileDir": true,
+    
+    // 型チェックモード
+    "python.analysis.typeCheckingMode": "basic",
+    
+    // 自動インポート補完
+    "python.analysis.autoImportCompletions": true
+}

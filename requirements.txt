@@ -1,0 +1,13 @@
+# 依存ライブラリ — Flowchart Excel (flowchart-excel)
+
+# GUIライブラリ
+customtkinter>=5.2.0
+
+# Excel COM操作
+pywin32>=306
+
+# 環境変数管理（将来拡張用）
+python-dotenv>=1.0.0
+
+# ビルドツール
+pyinstaller>=6.0.0
