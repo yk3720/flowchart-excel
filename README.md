@@ -12,14 +12,25 @@ Excel 上の **10列表** から AutoShape フローチャートを生成する 
 
 元は `MZ0000_FlowchartTool_rev014`（8列）を fork し、10列（段+列）レイアウトに対応。
 
-## 操作フロー（プレビュー必須）
+## 操作フロー（プレビュー必須 · studio 同等）
 
 1. Excel で表を選択
 2. 「表全体を確認して作成」または「選択範囲を確認して作成」
-3. **プレビュー窓**で段・列・分岐・接続を確認
+3. **WebView プレビュー**（flowchart-studio と同じ React Flow 描画）で確認
 4. 問題なければ「Excelに作成」→ AutoShape 描画
 
 キャンセルすれば Excel には何も書きません。スマート・パレット（単体図形）はプレビュー対象外です。
+
+初回またはプレビュー更新後は `preview-web` のビルドが必要です。
+
+```powershell
+cd preview-web
+npm install
+npm run build
+cd ..
+pip install -r requirements.txt
+python main.py
+```
 
 ## 列定義（table-10col-v2）
 

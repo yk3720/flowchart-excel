@@ -11,11 +11,16 @@ if not getattr(sys, "frozen", False):
 
 from app.utils.path_utils import ensure_environment
 from app.utils.logging_config import setup_logger
-from app.ui.main_window import FlowchartApp
 from app.constants import APP_NAME, REVISION, AUTHOR
 
 
 def main() -> None:
+    # WebView プレビュー子プロセス（exe 同梱時も同じバイナリ）
+    if len(sys.argv) >= 4 and sys.argv[1] == "--flowchart-preview":
+        from app.preview_host import main as preview_main
+
+        raise SystemExit(preview_main(sys.argv[2:]))
+
     ensure_environment()
     logger = setup_logger()
     logger.info("starting_app | %s %s | by %s", APP_NAME, REVISION, AUTHOR)
@@ -24,6 +29,8 @@ def main() -> None:
         logger.error("unsupported_os | Windows is required for Excel COM.")
         print("Error: Windows is required for Excel COM.")
         sys.exit(1)
+
+    from app.ui.main_window import FlowchartApp
 
     pythoncom.CoInitialize()
     try:

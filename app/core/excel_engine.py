@@ -15,6 +15,7 @@ from app.core.group_manager import (
 )
 from app.core.layout_preview import PreviewModel, build_preview_model, estimate_row_heights
 from app.core.parse_table import parse_table_rows
+from app.core.preview_payload import build_studio_preview_payload
 from app.core.shape_placer import place_shapes
 
 logger = logging.getLogger("flowchart-excel")
@@ -64,6 +65,20 @@ class ExcelFlowchartEngine:
                     break
 
         return data, sheet, start_cell, title_txt
+
+    def build_studio_payload(
+        self,
+        is_full_mode: bool,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """flowchart-studio 同等プレビュー用 JSON ペイロード。"""
+        data, _sheet, _start_cell, title_txt = self._read_selection(is_full_mode)
+        return build_studio_preview_payload(
+            data,
+            title=title_txt,
+            is_full_mode=is_full_mode,
+            config=config,
+        )
 
     def build_preview(
         self,

@@ -11,3 +11,6 @@ python-dotenv>=1.0.0
 
 # ビルドツール
 pyinstaller>=6.0.0
+
+# studio 同等プレビュー（WebView2）
+pywebview>=5.0.0

@@ -24,3 +24,7 @@ dist/
 logs/
 output/
 temp/
+
+# preview-web
+preview-web/node_modules/
+preview-web/dist/

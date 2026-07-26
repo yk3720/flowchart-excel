@@ -14,6 +14,7 @@ from app.core.excel_engine import ExcelFlowchartEngine, get_excel_app
 from app.core.shape_placer import set_text_style
 from app.core.connector_manager import add_decision_label
 from app.ui.preview_dialog import FlowPreviewDialog
+from app.ui.studio_preview import run_studio_preview
 from app.constants import (
     FONT_FAMILY, TITLE_FONT, APP_FONT, SMALL_FONT, LABEL_FONT, APP_NAME,
     FLOW_ACCENT, FLOW_ACCENT_HOVER, FLOW_SURFACE, FLOW_SURFACE_MUTED, FLOW_SURFACE_SUBTLE,
@@ -272,7 +273,7 @@ class FlowchartApp(ctk.CTk):
             return
         try:
             config = self._current_config()
-            model = self.engine.build_preview(is_full, config)
+            payload = self.engine.build_studio_payload(is_full, config)
         except Exception as e:
             logger.exception("preview_failed")
             messagebox.showerror(
@@ -283,13 +284,31 @@ class FlowchartApp(ctk.CTk):
             )
             return
 
+        confirmed = run_studio_preview(payload)
+        if confirmed is True:
+            self._start_draw_worker(is_full)
+            return
+        if confirmed is False:
+            return
+
+        # dist 未ビルド時は従来 Canvas にフォールバック
+        logger.warning("studio_preview_fallback_canvas")
+        try:
+            model = self.engine.build_preview(is_full, config)
+        except Exception as e:
+            logger.exception("canvas_preview_failed")
+            messagebox.showerror(
+                "プレビュー失敗",
+                f"studio プレビュー用 dist が無く、Canvas フォールバックも失敗しました。\n{e}\n"
+                "preview-web で npm run build を実行してください。",
+            )
+            return
         if not model.nodes:
             messagebox.showwarning(
                 "データなし",
                 "有効なノードがありません。ID が数値の行があるか確認してください。",
             )
             return
-
         theme = THEMES[self.var_theme.get()]
         FlowPreviewDialog(
             self,
@@ -636,13 +655,12 @@ class FlowchartApp(ctk.CTk):
         help_text = (
             "1. Excelでフローチャートにしたい表を選択します。\n"
             "   (ID, 種別, 色, 接続先, 段, 列, Text...)\n\n"
-            "2. 「🚀 表全体を確認して作成」を押すと、先に\n"
-            "   プレビュー窓が開きます。問題なければ\n"
-            "   「Excelに作成」で描画します（プレビュー必須）。\n\n"
-            "3. 「スマート・パレット」は選択セル位置に\n"
+            "2. 「🚀 表全体を確認して作成」を押すと、\n"
+            "   flowchart-studio と同じ React Flow プレビューが\n"
+            "   開きます。問題なければ「Excelに作成」です。\n\n"
+            "3. 初回は preview-web で npm run build が必要です。\n\n"
+            "4. 「スマート・パレット」は選択セル位置に\n"
             "   図形を直接置きます（プレビュー対象外）。\n\n"
-            "4. 描画が崩れる場合は「行間」「列間」を調整して\n"
-            "   再度プレビューしてください。\n\n"
             "5. 作成中は「中止」で安全に停止できます。"
         )
         txt.insert("0.0", help_text)

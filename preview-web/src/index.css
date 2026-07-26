@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+/* studio FlowCanvas / FlowShapeNode をスキャン */
+@source "../../../flowchart-studio/frontend/src/components/flowchart/**/*.{ts,tsx}";
+@source "../../../flowchart-studio/lib/flowchart/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
+
+@theme inline {
+  --color-flow-accent: var(--flow-accent);
+  --color-flow-accent-hover: var(--flow-accent-hover);
+  --color-flow-surface: var(--flow-surface);
+  --color-flow-surface-muted: var(--flow-surface-muted);
+  --color-flow-surface-subtle: var(--flow-surface-subtle);
+  --color-flow-border: var(--flow-border);
+  --color-flow-border-strong: var(--flow-border-strong);
+  --color-flow-text: var(--flow-text);
+  --color-flow-text-body: var(--flow-text-body);
+  --color-flow-text-muted: var(--flow-text-muted);
+  --color-flow-danger: var(--flow-danger);
+  --color-flow-warning: var(--flow-warning);
+}
+
+.react-flow svg {
+  overflow: visible;
+}
+
+.react-flow__node:has(.flow-shape-node-root) {
+  overflow: visible;
+}
+
+:root {
+  --flow-accent: #2563eb;
+  --flow-accent-hover: #1d4ed8;
+  --flow-surface: #ffffff;
+  --flow-surface-muted: #f8fafc;
+  --flow-surface-subtle: #f1f5f9;
+  --flow-border: #e2e8f0;
+  --flow-border-strong: #cbd5e1;
+  --flow-text: #0f172a;
+  --flow-text-body: #334155;
+  --flow-text-muted: #64748b;
+  --flow-danger: #dc2626;
+  --flow-warning: #d97706;
+  --flow-font-ui: 0.875rem;
+  --flow-font-hint: 0.75rem;
+  --flow-control-size: 2rem;
+  color: var(--flow-text);
+  background: var(--flow-surface-muted);
+  font-family: "Yu Gothic UI", "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
