@@ -3,7 +3,8 @@
 
 MUST: このスクリプトを実行した Python（sys.executable）で PyInstaller を動かす。
 PATH の素の `pyinstaller` を呼ぶと、ストア版等の別環境で解析され
-pywebview が同梱されずプレビューが開かなくなる（PYTHON_RULES §13）。
+pywebview / tkwebview2 が同梱されずプレビューが開かない・起動直後に落ちる（PYTHON_RULES §13）。
+依存: pywebview は 6.x 未満（tkwebview2 互換）。詳細は docs/03_技術仕様/POC_ルートA_結果_2026-07-27.md。
 """
 
 import os
@@ -56,6 +57,7 @@ pyinstaller_cmd = [
     "--name=FlowchartExcel",
     "--collect-all=customtkinter",
     "--collect-all=webview",
+    "--collect-all=tkwebview2",
     "--hidden-import=webview",
     "--hidden-import=pythonnet",
     "--hidden-import=clr_loader",

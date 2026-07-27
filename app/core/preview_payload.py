@@ -24,6 +24,11 @@ def excel_matrix_to_table(data: Tuple[Any, ...]) -> List[List[Any]]:
     return rows
 
 
+def table_list_to_com_tuple(table: List[List[Any]]) -> Tuple[Any, ...]:
+    """studio プレビュー JSON の table を parse_table 互換タプルへ戻す。"""
+    return tuple(tuple(row) for row in table)
+
+
 def resolve_schema(table: List[List[Any]]) -> Optional[str]:
     if not table:
         return None

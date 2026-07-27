@@ -17,6 +17,7 @@ export type PreviewPayload = {
     nodeCount?: number;
     colCount?: number;
     live?: boolean;
+    embedded?: boolean;
     watch?: Record<string, unknown>;
   };
 };

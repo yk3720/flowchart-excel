@@ -28,6 +28,7 @@ def run_preview_host(payload_path: Path, result_path: Path, dist_dir: Path) -> i
         table_fingerprint,
         try_refresh_studio_payload,
     )
+    from app.core.preview_inject import build_payload_inject_js
 
     payload: dict[str, Any] = json.loads(payload_path.read_text(encoding="utf-8"))
     index = (dist_dir / "index.html").resolve().as_uri()
@@ -37,8 +38,21 @@ def run_preview_host(payload_path: Path, result_path: Path, dist_dir: Path) -> i
     class Api:
         def confirm(self) -> None:
             stop_live.set()
+            # P2: 確定直前に再読込してから凍結（表示＝作成）
+            fresh = try_refresh_studio_payload(state["payload"])
+            if fresh:
+                state["payload"] = fresh
+                state["fp"] = table_fingerprint(fresh)
             result_path.write_text(
-                json.dumps({"action": "confirm"}), encoding="utf-8"
+                json.dumps(
+                    {
+                        "action": "confirm",
+                        "fingerprint": state["fp"],
+                        "payload": state["payload"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
             )
             for window in webview.windows:
                 window.destroy()
@@ -52,27 +66,19 @@ def run_preview_host(payload_path: Path, result_path: Path, dist_dir: Path) -> i
                 window.destroy()
 
     api = Api()
+    # ルート C POC: Excel フォーカス時もプレビューを作業継続可能にする
     window = webview.create_window(
-        title="フロープレビュー — 確認してから作成",
+        title="フロープレビュー",
         url=index,
         js_api=api,
         width=1000,
         height=720,
         min_size=(720, 480),
+        on_top=True,
     )
 
     def _inject(next_payload: dict[str, Any]) -> None:
-        payload_json = json.dumps(next_payload, ensure_ascii=False)
-        js = f"""
-        window.__PREVIEW_PAYLOAD__ = {payload_json};
-        (function tryInject(n) {{
-          if (window.setPreviewPayload) {{
-            window.setPreviewPayload(window.__PREVIEW_PAYLOAD__);
-          }} else if (n < 40) {{
-            setTimeout(function() {{ tryInject(n + 1); }}, 50);
-          }}
-        }})(0);
-        """
+        js = build_payload_inject_js(next_payload)
         try:
             if webview.windows:
                 webview.windows[0].evaluate_js(js)

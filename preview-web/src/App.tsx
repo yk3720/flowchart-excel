@@ -70,6 +70,7 @@ export function App() {
   const mode = payload.isFullMode ? "表全体" : "選択範囲";
   const errorText =
     generated && !generated.ok ? generated.errors.join(" / ") : null;
+  const embedded = Boolean(payload.meta?.embedded);
 
   return (
     <div className="flex h-full flex-col bg-flow-surface-muted">
@@ -138,6 +139,7 @@ export function App() {
         )}
       </div>
 
+      {!embedded ? (
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-flow-border bg-flow-surface px-4 py-3">
         <p className="text-xs text-flow-text-muted">
           約0.75秒ごとに Excel を再読込します（セル編集中はスキップ）。
@@ -160,6 +162,7 @@ export function App() {
           </button>
         </div>
       </footer>
+      ) : null}
     </div>
   );
 }

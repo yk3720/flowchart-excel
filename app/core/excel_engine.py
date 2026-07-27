@@ -15,7 +15,7 @@ from app.core.group_manager import (
 )
 from app.core.layout_preview import PreviewModel, build_preview_model, estimate_row_heights
 from app.core.parse_table import parse_table_rows
-from app.core.preview_payload import build_studio_preview_payload
+from app.core.preview_payload import build_studio_preview_payload, table_list_to_com_tuple
 from app.core.shape_placer import place_shapes
 
 logger = logging.getLogger("flowchart-excel")
@@ -93,6 +93,30 @@ class ExcelFlowchartEngine:
         payload["meta"] = meta
         return payload
 
+    def _resolve_watch(self, watch: Dict[str, Any]) -> Tuple[Any, Any]:
+        """watch メタから配置先シートと起点セルを解決する。"""
+        app = get_excel_app()
+        if not app:
+            raise RuntimeError("Excelが起動していません。")
+
+        workbook_name = watch.get("workbookName")
+        sheet_name = watch.get("sheetName")
+        anchor_address = watch.get("anchorAddress")
+        if not workbook_name or not sheet_name or not anchor_address:
+            raise ValueError("watch メタが不完全です。")
+
+        workbook = None
+        for wb in app.Workbooks:
+            if str(wb.Name) == str(workbook_name):
+                workbook = wb
+                break
+        if workbook is None:
+            raise RuntimeError(f"ブックが見つかりません: {workbook_name}")
+
+        sheet = workbook.Sheets(sheet_name)
+        start_cell = sheet.Range(anchor_address)
+        return sheet, start_cell
+
     def build_preview(
         self,
         is_full_mode: bool,
@@ -122,6 +146,70 @@ class ExcelFlowchartEngine:
         config: Dict[str, Any],
         theme: Dict[str, Any],
     ) -> str:
+        data, sheet, start_cell, title_txt = self._read_selection(is_full_mode)
+        return self._draw_core(
+            data=data,
+            sheet=sheet,
+            start_cell=start_cell,
+            title_txt=title_txt,
+            is_full_mode=is_full_mode,
+            config=config,
+            theme=theme,
+        )
+
+    def draw_from_studio_payload(
+        self,
+        payload: Dict[str, Any],
+        theme: Dict[str, Any],
+    ) -> str:
+        """プレビュー確定スナップショットから描画（表示内容＝作成内容）。"""
+        watch = (payload.get("meta") or {}).get("watch")
+        if not watch:
+            raise ValueError("watch メタがありません。プレビューを開き直してください。")
+
+        table = payload.get("table") or []
+        if not table:
+            raise ValueError("スナップショットに表データがありません。")
+
+        sheet, start_cell = self._resolve_watch(watch)
+        data = table_list_to_com_tuple(table)
+        layout = payload.get("layout") or {}
+        config = {
+            "width": float(layout["width"]),
+            "height": float(layout["heightMin"]),
+            "gap_v": float(layout["gapV"]),
+            "gap_h": float(layout["gapH"]),
+        }
+        title_txt = str(payload.get("title") or "フローチャート")
+        is_full_mode = bool(payload.get("isFullMode"))
+
+        logger.info(
+            "draw_from_snapshot | title=%s | full=%s | rows=%s",
+            title_txt,
+            is_full_mode,
+            len(table),
+        )
+        return self._draw_core(
+            data=data,
+            sheet=sheet,
+            start_cell=start_cell,
+            title_txt=title_txt,
+            is_full_mode=is_full_mode,
+            config=config,
+            theme=theme,
+        )
+
+    def _draw_core(
+        self,
+        *,
+        data: Any,
+        sheet: Any,
+        start_cell: Any,
+        title_txt: str,
+        is_full_mode: bool,
+        config: Dict[str, Any],
+        theme: Dict[str, Any],
+    ) -> str:
         app = get_excel_app()
         if not app:
             logger.error("excel_not_found | Excel is not running.")
@@ -131,8 +219,6 @@ class ExcelFlowchartEngine:
         app.DisplayAlerts = False
 
         try:
-            data, sheet, start_cell, title_txt = self._read_selection(is_full_mode)
-
             base_left = float(start_cell.Left)
             base_top = float(start_cell.Top)
             h_min = float(config["height"])

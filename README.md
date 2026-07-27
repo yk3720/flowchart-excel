@@ -12,13 +12,14 @@ Excel 上の **10列表** から AutoShape フローチャートを生成する 
 
 元は `MZ0000_FlowchartTool_rev014`（8列）を fork し、10列（段+列）レイアウトに対応。
 
-## 操作フロー（プレビュー必須 · studio 同等）
+## 操作フロー（プレビュー必須 · studio 同等 · 1窓）
 
-> **現行（As-Is）** の CTA。1窓化・前面絞りの再設計は Draft（**未実装**）— [UI再設計仕様](docs/02_機能設計/UI再設計_1窓プレビュー_仕様_2026-07-26.md) · [事前調査](docs/03_技術仕様/調査_1窓WebView埋め込み_事前調査_2026-07-26.md)。
+> **rev007（To-Be）:** CTk **1窓**内に React Flow プレビューを埋め込み（ルート A）。埋め込み不可時は **2窓フォールバック**（ルート C）。  
+> 仕様 · POC: [UI再設計仕様](docs/02_機能設計/UI再設計_1窓プレビュー_仕様_2026-07-26.md) · [ルート A 結果](docs/03_技術仕様/POC_ルートA_結果_2026-07-27.md) · [事前調査](docs/03_技術仕様/調査_1窓WebView埋め込み_事前調査_2026-07-26.md)
 
 1. Excel で表を選択
-2. 「表全体を確認して作成」または「選択範囲を確認して作成」
-3. **WebView プレビュー**（flowchart-studio と同じ React Flow）で確認  
+2. 「表を読み込んでプレビュー」
+3. **同一ウィンドウ内**（またはフォールバック時は別 WebView 窓）で React Flow を確認  
    - プレビュー表示中は Excel 表の変更を約 0.75 秒間隔で再読込（ライブ更新）
 4. 問題なければ「Excelに作成」→ AutoShape 描画
 
@@ -52,7 +53,7 @@ python main.py
 1. Web で表を編集
 2. 表を TSV コピー（または JSON から表部分を Excel に貼付）
 3. Excel で範囲を選択
-4. 本ツールで「選択範囲を確認して作成」（プレビュー必須）
+4. 本ツールで **「表を読み込んでプレビュー」**（本線 CTA）。選択範囲のみの場合は **「その他 ▾」→「選択範囲を確認して作成」**
 
 JSON ファイルの直接取込は **未実装**（今後の拡張候補）。
 
@@ -90,7 +91,9 @@ python -m unittest discover -s tests -p "test_*.py"
 
 前提: 上記のとおり **`flowchart-studio` と `preview-web` の両方で `npm install` 済み**であること（`build_exe.py` が内部で `npm run build` を実行する）。
 
-**必須:** `.venv` の Python で `build_exe.py` を実行すること（脚本は `sys.executable -m PyInstaller` を使う）。PATH 上の素の `pyinstaller`（ストア版 Python 等）で固めると、**HTML は入るが `pywebview` が欠ける**ことがある → プレビューが開かない。
+**必須:** `.venv` の Python で `build_exe.py` を実行すること（脚本は `sys.executable -m PyInstaller` を使う）。PATH 上の素の `pyinstaller`（ストア版 Python 等）で固めると、**HTML は入るが `pywebview` / `tkwebview2` が欠ける**ことがある → プレビューが開かない · 起動直後に落ちる。
+
+**依存:** `pywebview` は **6.x 未満**（`requirements.txt` 参照）。`tkwebview2` との API 非互換あり — 詳細は [POC ルート A](docs/03_技術仕様/POC_ルートA_結果_2026-07-27.md) · `PYTHON_RULES` §13。
 
 ```powershell
 cd c:\yk-application\flowchart-studio
@@ -112,9 +115,17 @@ Select-String -Path .\build\FlowchartExcel\warn-FlowchartExcel.txt -Pattern 'mis
 # 期待: プレビュー窓が開く / 少なくとも result.json が "pywebview missing" でない
 ```
 
-詳細（再発防止の SSOT）: `yk-skill/rule/40_python/PYTHON_RULES.md` §13「PyInstaller は venv の Python 経由」
+詳細（再発防止の SSOT）: `yk-skill/rule/40_python/PYTHON_RULES.md` §13
+
+### exe が起動しないとき
+
+1. `dist\FlowchartExcel.exe` を直接起動（デスクトップショートカットのリンク切れを除外）
+2. `dist\logs\app.log` 末尾を確認（`embedded_preview_init_failed` · `pywebview` · `web_view` 等）
+3. venv で `python main.py` — こちらだけ動く場合は PyInstaller 同梱漏れ
 
 ## 関連ドキュメント
 
 - flowchart-studio データモデル: `../flowchart-studio/docs/03_技術仕様/データモデル.md`
+- 1窓 POC（ルート A）: [docs/03_技術仕様/POC_ルートA_結果_2026-07-27.md](docs/03_技術仕様/POC_ルートA_結果_2026-07-27.md)
+- 2窓 POC（ルート C）: [docs/03_技術仕様/POC_ルートC_結果_2026-07-27.md](docs/03_技術仕様/POC_ルートC_結果_2026-07-27.md)
 - 旧 MZ0000: `c:\1.cursor\5.Python\3.作成中\MZ0000_FlowchartTool_rev014\`

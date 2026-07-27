@@ -7,7 +7,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
+
+PreviewResult = Optional[Union[bool, Dict[str, Any]]]
 
 logger = logging.getLogger("flowchart-excel")
 
@@ -29,10 +31,11 @@ def resolve_preview_dist() -> Optional[Path]:
     return None
 
 
-def run_studio_preview(payload: Dict[str, Any]) -> Optional[bool]:
-    """studio 品質プレビューを開き、確定なら True・キャンセル False。
+def run_studio_preview(payload: Dict[str, Any]) -> PreviewResult:
+    """studio 品質プレビューを開く。
 
-    dist が無い場合は None（呼び出し側で Canvas フォールバック）。
+    確定時は result dict（payload/fingerprint 含む）。
+    キャンセル時 False。dist 無し時 None。
     """
     dist = resolve_preview_dist()
     if dist is None:
@@ -73,4 +76,6 @@ def run_studio_preview(payload: Dict[str, Any]) -> Optional[bool]:
             logger.exception("studio_preview_result_invalid")
             return False
 
-        return result.get("action") == "confirm"
+        if result.get("action") == "confirm":
+            return result
+        return False

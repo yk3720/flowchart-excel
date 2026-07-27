@@ -14,6 +14,7 @@ from app.core.excel_engine import ExcelFlowchartEngine, get_excel_app
 from app.core.shape_placer import set_text_style
 from app.core.connector_manager import add_decision_label
 from app.ui.preview_dialog import FlowPreviewDialog
+from app.ui.embedded_preview import EmbeddedStudioPreview, embedded_preview_available
 from app.ui.studio_preview import run_studio_preview
 from app.constants import (
     FONT_FAMILY, TITLE_FONT, APP_FONT, SMALL_FONT, LABEL_FONT, APP_NAME,
@@ -52,9 +53,9 @@ class FlowchartApp(ctk.CTk):
         self.configure(fg_color=FLOW_SURFACE_MUTED)
         
         # 状態保持
-        self.is_mini_mode = False
         self.is_help_mode = False
         self.is_processing = False
+        self.preview_active = False
         self.stop_event = threading.Event()
         self.engine = ExcelFlowchartEngine(self.stop_event)
         
@@ -66,9 +67,12 @@ class FlowchartApp(ctk.CTk):
         self.var_theme = tk.StringVar(value="標準（信頼）")
         self.status_text = tk.StringVar(value="Excelを待機中...")
         self.preset_buttons: Dict[str, ctk.CTkButton] = {}
+        self._embedded_preview: Optional[EmbeddedStudioPreview] = None
+        self._use_embedded = embedded_preview_available()
         
         self._setup_window()
         self._create_header()
+        self._create_menus()
         
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.content_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
@@ -87,141 +91,252 @@ class FlowchartApp(ctk.CTk):
 
     def _setup_window(self) -> None:
         """ウィンドウの基本属性設定。"""
-        self.geometry("400x850+50+50")
-        self.minsize(350, 120)
-        self.attributes('-topmost', True)
+        if self._use_embedded:
+            self.geometry("1100x820+50+50")
+            self.minsize(720, 600)
+        else:
+            self.geometry("400x240+50+50")
+            self.minsize(350, 180)
         self.grid_columnconfigure(0, weight=1)
 
     def _create_header(self) -> None:
         """共通ヘッダー作成。"""
         f_head = ctk.CTkFrame(self, height=40, corner_radius=0, fg_color=FLOW_SURFACE)
         f_head.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
-        f_head.grid_columnconfigure(2, weight=1)
 
-        ctk.CTkButton(f_head, text="🏠", width=40, height=30, corner_radius=CORNER_RADIUS,
-                      command=lambda: None, **STYLE_SECONDARY).grid(row=0, column=0, padx=(5, 2), pady=5)
+        ctk.CTkLabel(f_head, text=APP_NAME, font=TITLE_FONT, text_color=FLOW_TEXT).grid(
+            row=0, column=0, padx=(10, 4), sticky="w"
+        )
 
-        self.btn_help = ctk.CTkButton(f_head, text="📖", width=40, height=30, corner_radius=CORNER_RADIUS,
-                                     command=self._toggle_help, **STYLE_SECONDARY)
-        self.btn_help.grid(row=0, column=1, padx=2)
+        self.btn_menu_settings = ctk.CTkButton(
+            f_head, text="設定 ▾", width=64, height=30, corner_radius=CORNER_RADIUS,
+            command=lambda: self._popup_menu(self.menu_settings, self.btn_menu_settings),
+            **STYLE_SECONDARY,
+        )
+        self.btn_menu_settings.grid(row=0, column=1, padx=2, pady=5)
 
-        ctk.CTkLabel(f_head, text=APP_NAME, font=TITLE_FONT, text_color=FLOW_TEXT).grid(row=0, column=2, padx=10)
+        self.btn_menu_other = ctk.CTkButton(
+            f_head, text="その他 ▾", width=72, height=30, corner_radius=CORNER_RADIUS,
+            command=lambda: self._popup_menu(self.menu_other, self.btn_menu_other),
+            **STYLE_SECONDARY,
+        )
+        self.btn_menu_other.grid(row=0, column=2, padx=2, pady=5)
 
-        ctk.CTkButton(f_head, text="⬅", width=40, height=30, corner_radius=CORNER_RADIUS,
-                      command=self._snap_left, **STYLE_SECONDARY).grid(row=0, column=3, padx=2)
-        ctk.CTkButton(f_head, text="➡", width=40, height=30, corner_radius=CORNER_RADIUS,
-                      command=self._snap_right, **STYLE_SECONDARY).grid(row=0, column=4, padx=2)
-
-        self.btn_toggle = ctk.CTkButton(f_head, text="小", width=45, height=30,
-                                        corner_radius=CORNER_RADIUS, command=self._toggle_mini_mode,
-                                        **STYLE_SECONDARY)
-        self.btn_toggle.grid(row=0, column=5, padx=2)
+        f_head.grid_columnconfigure(3, weight=1)
 
         ctk.CTkButton(f_head, text="閉", width=45, height=30, corner_radius=CORNER_RADIUS,
-                      command=self.destroy, **STYLE_SECONDARY).grid(row=0, column=6, padx=(2, 5))
+                      command=self.destroy, **STYLE_SECONDARY).grid(row=0, column=4, padx=(2, 5))
 
         ctk.CTkFrame(self, height=1, corner_radius=0, fg_color=FLOW_BORDER).grid(
             row=1, column=0, sticky="ew", padx=0, pady=0
         )
 
-    def _create_widgets(self) -> None:
-        """メインコンテンツのウィジェット配置。"""
-        self.content_frame.grid_columnconfigure(0, weight=1)
+    def _create_menus(self) -> None:
+        """低頻度操作をヘッダーメニューへ退避（ルート C · 前面 CTA 絞り）。"""
+        self.menu_settings = tk.Menu(self, tearoff=0)
+        self.menu_settings.add_command(label="寸法・テーマ…", command=self._show_settings_dialog)
 
-        # ステータス表示（カード）
-        self.status_card = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
-        self.status_card.grid(row=0, column=0, padx=0, pady=5, sticky="ew")
-        self.status_card.grid_columnconfigure(0, weight=1)
-        self.lbl_status = ctk.CTkLabel(self.status_card, textvariable=self.status_text, font=SMALL_FONT,
-                                     fg_color="transparent", text_color=FLOW_TEXT_BODY, height=50)
-        self.lbl_status.grid(row=0, column=0, padx=10, pady=8, sticky="ew")
+        self.menu_other = tk.Menu(self, tearoff=0)
 
-        # 雛形作成
-        f_temp = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
-        f_temp.grid(row=1, column=0, padx=0, pady=5, sticky="ew")
-        f_temp.grid_columnconfigure((0, 1), weight=1)
-        for i, (t, m) in enumerate([("基本：判断無", "simple_no"), ("基本：判断有", "simple_yes"),
-                                     ("階層：判断無", "complex_no"), ("階層：判断有", "complex_yes")]):
-            ctk.CTkButton(f_temp, text=t, command=lambda x=m: self._create_template(x),
-                          font=SMALL_FONT, height=40, corner_radius=CORNER_RADIUS,
-                          **STYLE_SECONDARY).grid(row=i//2, column=i%2, padx=8, pady=(8 if i < 2 else 4, 8), sticky="ew")
+        menu_template = tk.Menu(self.menu_other, tearoff=0)
+        for label, mode in [
+            ("基本：判断無", "simple_no"),
+            ("基本：判断有", "simple_yes"),
+            ("階層：判断無", "complex_no"),
+            ("階層：判断有", "complex_yes"),
+        ]:
+            menu_template.add_command(
+                label=label, command=lambda m=mode: self._create_template(m)
+            )
+        self.menu_other.add_cascade(label="雛形作成", menu=menu_template)
 
-        # スマート・パレット
-        f_pal = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
-        f_pal.grid(row=2, column=0, padx=0, pady=5, sticky="ew")
-        f_pal.grid_columnconfigure((0, 1), weight=1)
-        ctk.CTkLabel(f_pal, text="🎨 スマート・パレット", font=LABEL_FONT, text_color=FLOW_TEXT
-                    ).grid(row=0, column=0, columnspan=2, pady=(10, 5))
-        for i, (n, v) in enumerate([("端子", "端子"), ("処理", "処理"), ("判断", "判断"), ("入出力", "入出力"), ("手動入力", "手動入力")]):
-            ctk.CTkButton(f_pal, text=n, command=lambda x=v: self._smart_input(x),
-                          height=35, corner_radius=CORNER_RADIUS, **STYLE_SECONDARY
-                          ).grid(row=(i//2)+1, column=i%2, padx=8, pady=5, sticky="ew")
+        menu_palette = tk.Menu(self.menu_other, tearoff=0)
+        for label, stype in [
+            ("端子", "端子"),
+            ("処理", "処理"),
+            ("判断", "判断"),
+            ("入出力", "入出力"),
+            ("手動入力", "手動入力"),
+        ]:
+            menu_palette.add_command(
+                label=label, command=lambda s=stype: self._smart_input(s)
+            )
+        self.menu_other.add_cascade(label="スマート・パレット（プレビュー対象外）", menu=menu_palette)
 
-        # 詳細設定
-        f_set = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
-        f_set.grid(row=3, column=0, padx=0, pady=5, sticky="ew")
-        f_set.grid_columnconfigure(1, weight=1)
-        for i, (l, v) in enumerate([("高さ:", self.var_height), ("幅:", self.var_width), ("行間:", self.var_gap_v), ("列間:", self.var_gap_h)]):
-            ctk.CTkLabel(f_set, text=l, font=APP_FONT, text_color=FLOW_TEXT_BODY
-                        ).grid(row=i, column=0, padx=10, pady=(8 if i == 0 else 2, 2), sticky="w")
-            ctk.CTkEntry(f_set, textvariable=v, width=75, justify="right", corner_radius=CORNER_RADIUS,
-                        fg_color=FLOW_SURFACE, text_color=FLOW_TEXT_BODY,
-                        border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER
-                        ).grid(row=i, column=1, padx=10, pady=(8 if i == 0 else 2, 2), sticky="e")
-
-        ctk.CTkOptionMenu(f_set, values=list(THEMES.keys()), variable=self.var_theme, font=SMALL_FONT,
-                         corner_radius=CORNER_RADIUS, fg_color=FLOW_SURFACE_SUBTLE, button_color=FLOW_ACCENT,
-                         button_hover_color=FLOW_ACCENT_HOVER, text_color=FLOW_TEXT_BODY,
-                         dropdown_fg_color=FLOW_SURFACE, dropdown_text_color=FLOW_TEXT_BODY,
-                         ).grid(row=4, column=0, columnspan=2, padx=10, pady=(5, 10), sticky="ew")
-
-        # プリセット
-        f_preset = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
-        f_preset.grid(row=4, column=0, padx=0, pady=5, sticky="ew")
-        f_preset.grid_columnconfigure((0, 1, 2), weight=1)
-        for i, p in enumerate(PRESETS):
-            btn = ctk.CTkButton(f_preset, text=p["name"], command=lambda x=p: self._apply_preset(x),
-                                width=60, corner_radius=CORNER_RADIUS, **STYLE_SECONDARY)
-            btn.grid(row=0, column=i, padx=8, pady=10, sticky="ew")
-            self.preset_buttons[p["id"]] = btn
-
-        # メンテナンス
-        ctk.CTkButton(self.content_frame, text="↩ Undo (直前削除)", command=self._undo_last,
-                      corner_radius=CORNER_RADIUS, **STYLE_SECONDARY).grid(row=5, column=0, padx=0, pady=2, sticky="ew")
-        ctk.CTkButton(self.content_frame, text="🗑 図面クリア", command=self._clear_canvas,
-                      corner_radius=CORNER_RADIUS, **STYLE_DESTRUCTIVE).grid(row=6, column=0, padx=0, pady=2, sticky="ew")
-
-        # 生成ボタン
-        f_gen = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        f_gen.grid(row=7, column=0, padx=0, pady=(15, 5), sticky="ew")
-        f_gen.grid_columnconfigure(0, weight=1)
-
-        self.btn_gen_sel = ctk.CTkButton(
-            f_gen,
-            text="🟦 選択範囲を確認して作成",
+        self.menu_other.add_separator()
+        self.menu_other.add_command(
+            label="選択範囲を確認して作成",
             command=self._generate_selection,
-            corner_radius=CORNER_RADIUS,
-            font=(FONT_FAMILY, 13, "bold"),
-            height=45,
-            **STYLE_SECONDARY,
         )
-        self.btn_gen_sel.grid(row=0, column=0, padx=0, pady=(0, 10), sticky="ew")
+        self.menu_other.add_command(label="↩ Undo (直前削除)", command=self._undo_last)
+        self.menu_other.add_command(label="🗑 図面クリア", command=self._clear_canvas)
+        self.menu_other.add_separator()
+        self.menu_other.add_command(label="📖 操作ガイド", command=self._toggle_help)
 
-        self.btn_gen_full = ctk.CTkButton(
-            f_gen,
-            text="🚀 表全体を確認して作成",
-            command=self._generate_full,
-            corner_radius=CORNER_RADIUS,
-            font=(FONT_FAMILY, 14, "bold"),
-            height=55,
-            **STYLE_PRIMARY,
+    def _popup_menu(self, menu: tk.Menu, anchor: ctk.CTkButton) -> None:
+        """CTk ボタン位置に tk.Menu を表示する。"""
+        try:
+            menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _show_settings_dialog(self) -> None:
+        """寸法・テーマ・プリセット設定ダイアログ。"""
+        if getattr(self, "_settings_dialog", None) is not None:
+            try:
+                if self._settings_dialog.winfo_exists():
+                    self._settings_dialog.focus()
+                    return
+            except tk.TclError:
+                pass
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("設定")
+        dlg.geometry("360x420")
+        dlg.transient(self)
+        dlg.grab_set()
+        self._settings_dialog = dlg
+
+        body = ctk.CTkFrame(dlg, corner_radius=CORNER_RADIUS, **STYLE_CARD)
+        body.pack(fill="both", expand=True, padx=12, pady=12)
+        body.grid_columnconfigure(1, weight=1)
+
+        for i, (label, var) in enumerate([
+            ("高さ:", self.var_height),
+            ("幅:", self.var_width),
+            ("行間:", self.var_gap_v),
+            ("列間:", self.var_gap_h),
+        ]):
+            ctk.CTkLabel(body, text=label, font=APP_FONT, text_color=FLOW_TEXT_BODY).grid(
+                row=i, column=0, padx=10, pady=(8 if i == 0 else 2, 2), sticky="w"
+            )
+            ctk.CTkEntry(
+                body, textvariable=var, width=75, justify="right", corner_radius=CORNER_RADIUS,
+                fg_color=FLOW_SURFACE, text_color=FLOW_TEXT_BODY,
+                border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER,
+            ).grid(row=i, column=1, padx=10, pady=(8 if i == 0 else 2, 2), sticky="e")
+
+        ctk.CTkOptionMenu(
+            body, values=list(THEMES.keys()), variable=self.var_theme, font=SMALL_FONT,
+            corner_radius=CORNER_RADIUS, fg_color=FLOW_SURFACE_SUBTLE, button_color=FLOW_ACCENT,
+            button_hover_color=FLOW_ACCENT_HOVER, text_color=FLOW_TEXT_BODY,
+            dropdown_fg_color=FLOW_SURFACE, dropdown_text_color=FLOW_TEXT_BODY,
+        ).grid(row=4, column=0, columnspan=2, padx=10, pady=(5, 10), sticky="ew")
+
+        preset_row = ctk.CTkFrame(body, fg_color="transparent")
+        preset_row.grid(row=5, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="ew")
+        preset_row.grid_columnconfigure((0, 1, 2), weight=1)
+        for i, preset in enumerate(PRESETS):
+            btn = self.preset_buttons.get(preset["id"])
+            if btn is None:
+                btn = ctk.CTkButton(
+                    preset_row, text=preset["name"],
+                    command=lambda x=preset: self._apply_preset(x),
+                    width=60, corner_radius=CORNER_RADIUS, **STYLE_SECONDARY,
+                )
+                self.preset_buttons[preset["id"]] = btn
+            btn.grid(row=0, column=i, padx=4, pady=4, sticky="ew")
+
+        ctk.CTkButton(
+            dlg, text="閉じる", command=dlg.destroy, corner_radius=CORNER_RADIUS, **STYLE_SECONDARY,
+        ).pack(pady=(0, 12))
+
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+
+    def _create_widgets(self) -> None:
+        """1窓レイアウト: ステータス → 読込 → プレビュー → Excelに作成。"""
+        self.content_frame.grid_columnconfigure(0, weight=1)
+        self.content_frame.grid_rowconfigure(2 if self._use_embedded else 0, weight=1)
+
+        self.status_card = ctk.CTkFrame(self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD)
+        self.status_card.grid(row=0, column=0, padx=0, pady=(0, 8), sticky="ew")
+        self.status_card.grid_columnconfigure(0, weight=1)
+        self.lbl_status = ctk.CTkLabel(
+            self.status_card, textvariable=self.status_text, font=SMALL_FONT,
+            fg_color="transparent", text_color=FLOW_TEXT_BODY, height=44,
         )
-        self.btn_gen_full.grid(row=1, column=0, padx=0, pady=0, sticky="ew")
+        self.lbl_status.grid(row=0, column=0, padx=10, pady=6, sticky="ew")
 
-        # 中止ボタン
-        self.btn_cancel = ctk.CTkButton(f_gen, text="✋ 中止", command=self._cancel_generation,
-                                       corner_radius=CORNER_RADIUS, font=(FONT_FAMILY, 14, "bold"), height=55,
-                                       **STYLE_DESTRUCTIVE)
+        if self._use_embedded:
+            f_load = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+            f_load.grid(row=1, column=0, padx=0, pady=(0, 8), sticky="ew")
+            f_load.grid_columnconfigure(0, weight=1)
+            self.btn_preview = ctk.CTkButton(
+                f_load,
+                text="表を読み込んでプレビュー",
+                command=self._load_preview,
+                corner_radius=CORNER_RADIUS,
+                font=(FONT_FAMILY, 13, "bold"),
+                height=44,
+                **STYLE_PRIMARY,
+            )
+            self.btn_preview.grid(row=0, column=0, sticky="ew")
+
+            self.preview_card = ctk.CTkFrame(
+                self.content_frame, corner_radius=CORNER_RADIUS, **STYLE_CARD,
+            )
+            self.preview_card.grid(row=2, column=0, padx=0, pady=(0, 8), sticky="nsew")
+            self.preview_card.grid_columnconfigure(0, weight=1)
+            self.preview_card.grid_rowconfigure(0, weight=1)
+            try:
+                self._embedded_preview = EmbeddedStudioPreview(
+                    self.preview_card,
+                    schedule_after=self.after,
+                    on_payload_change=self._update_create_button_state,
+                )
+            except Exception:
+                logger.exception("embedded_preview_init_failed")
+                self._use_embedded = False
+                self._embedded_preview = None
+                for child in self.content_frame.winfo_children():
+                    if child is not self.status_card:
+                        child.destroy()
+                self.content_frame.grid_rowconfigure(2, weight=0)
+
+        f_actions = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        self._gen_frame = f_actions
+        if self._use_embedded:
+            f_actions.grid(row=3, column=0, padx=0, pady=(0, 4), sticky="ew")
+            f_actions.grid_columnconfigure(0, weight=1)
+            f_actions.grid_columnconfigure(1, weight=1)
+            self.btn_create = ctk.CTkButton(
+                f_actions,
+                text="Excelに作成",
+                command=self._confirm_create,
+                corner_radius=CORNER_RADIUS,
+                font=(FONT_FAMILY, 14, "bold"),
+                height=48,
+                state="disabled",
+                **STYLE_PRIMARY,
+            )
+            self.btn_create.grid(row=0, column=1, padx=(8, 0), sticky="ew")
+        else:
+            f_actions.grid(row=1, column=0, padx=0, pady=(10, 5), sticky="ew")
+            f_actions.grid_columnconfigure(0, weight=1)
+            self.btn_create = None
+
+        self.btn_cancel = ctk.CTkButton(
+            f_actions, text="✋ 中止", command=self._cancel_generation,
+            corner_radius=CORNER_RADIUS, font=(FONT_FAMILY, 14, "bold"), height=48,
+            **STYLE_DESTRUCTIVE,
+        )
+        if not self._use_embedded:
+            self.btn_preview = ctk.CTkButton(
+                f_actions,
+                text="表を読み込んでプレビュー",
+                command=self._load_preview,
+                corner_radius=CORNER_RADIUS,
+                font=(FONT_FAMILY, 14, "bold"),
+                height=55,
+                **STYLE_PRIMARY,
+            )
+            self.btn_preview.grid(row=0, column=0, sticky="ew")
+            self._hint_label = ctk.CTkLabel(
+                self.content_frame,
+                text="プレビュー窓で内容を確認し「Excelに作成」を押してください。",
+                font=SMALL_FONT, text_color=FLOW_TEXT_MUTED, wraplength=360,
+            )
+            self._hint_label.grid(row=2, column=0, padx=4, pady=(0, 8), sticky="w")
 
     def _cancel_generation(self) -> None:
         """進行中の生成処理を中止する。"""
@@ -237,18 +352,30 @@ class FlowchartApp(ctk.CTk):
         """
         self.is_processing = state
         st = "disabled" if state else "normal"
-        self.btn_gen_sel.configure(state=st)
-        self.btn_gen_full.configure(state=st)
+        self.btn_preview.configure(state=st)
+        if self.btn_create is not None:
+            if state:
+                self.btn_create.configure(state="disabled")
+            else:
+                self._update_create_button_state()
         
         if state:
-            self.btn_gen_full.grid_remove()
-            self.btn_cancel.grid(row=1, column=0, sticky="ew")
+            if self._embedded_preview is not None:
+                self._embedded_preview.stop_live()
+            self.btn_preview.grid_remove()
+            if self.btn_create is not None:
+                self.btn_create.grid_remove()
+            self.btn_cancel.grid(row=0, column=0, columnspan=2, sticky="ew")
             self.btn_cancel.configure(state="normal")
             self.status_text.set("🚀 生成中...")
             self.stop_event.clear()
         else:
             self.btn_cancel.grid_remove()
-            self.btn_gen_full.grid(row=1, column=0, sticky="ew")
+            self.btn_preview.grid(row=0, column=0, sticky="ew")
+            if self._use_embedded and self.btn_create is not None:
+                self.btn_create.grid(row=0, column=1, padx=(8, 0), sticky="ew")
+            if self._embedded_preview is not None and self.preview_active:
+                self._embedded_preview.start_live()
         self.update()
 
     def _current_config(self) -> Dict[str, float]:
@@ -259,15 +386,38 @@ class FlowchartApp(ctk.CTk):
             "gap_h": self.var_gap_h.get(),
         }
 
-    def _generate_full(self) -> None:
-        """表全体: プレビュー必須 → 確認後に Excel 作成。"""
-        self._open_preview_then_draw(True)
+    def _update_create_button_state(self) -> None:
+        if self.btn_create is None or self.is_processing:
+            return
+        enabled = (
+            self.preview_active
+            and self._embedded_preview is not None
+            and self._embedded_preview.is_create_enabled()
+        )
+        self.btn_create.configure(state="normal" if enabled else "disabled")
+
+    def _confirm_create(self) -> None:
+        """埋め込みプレビュー表示中の内容で Excel 作成。"""
+        if self.is_processing or not self.preview_active or not self._embedded_preview:
+            return
+        snapshot = self._embedded_preview.freeze_snapshot()
+        if not snapshot or not self._embedded_preview.is_create_enabled():
+            messagebox.showwarning(
+                "作成不可",
+                "有効なプレビューがありません。表を読み込んでから再試行してください。",
+            )
+            return
+        self._start_draw_worker(snapshot)
+
+    def _load_preview(self) -> None:
+        """表全体を読み込み、プレビューのみ開く（作成はプレビュー窓から）。"""
+        self._open_preview_session(True)
 
     def _generate_selection(self) -> None:
         """選択範囲: プレビュー必須 → 確認後に Excel 作成。"""
-        self._open_preview_then_draw(False)
+        self._open_preview_session(False)
 
-    def _open_preview_then_draw(self, is_full: bool) -> None:
+    def _open_preview_session(self, is_full: bool) -> None:
         """プレビュー窓を開き、確定時のみ描画ワーカーを起動する。"""
         if self.is_processing:
             return
@@ -284,11 +434,32 @@ class FlowchartApp(ctk.CTk):
             )
             return
 
-        confirmed = run_studio_preview(payload)
-        if confirmed is True:
-            self._start_draw_worker(is_full)
+        if self._use_embedded and self._embedded_preview is not None:
+            self._embedded_preview.load_session(payload)
+            self.preview_active = True
+            self._refresh_status_line()
+            self._update_create_button_state()
             return
-        if confirmed is False:
+
+        self.preview_active = True
+        self._refresh_status_line()
+        try:
+            result = run_studio_preview(payload)
+        finally:
+            self.preview_active = False
+            self._refresh_status_line()
+
+        if isinstance(result, dict) and result.get("action") == "confirm":
+            snapshot = result.get("payload")
+            if not snapshot:
+                messagebox.showerror(
+                    "作成失敗",
+                    "プレビュー確定データがありません。もう一度プレビューからやり直してください。",
+                )
+                return
+            self._start_draw_worker(snapshot)
+            return
+        if result is False:
             return
 
         # dist 未ビルド時は従来 Canvas にフォールバック
@@ -315,12 +486,50 @@ class FlowchartApp(ctk.CTk):
             model,
             shape_line_bgr=theme["shape_line"],
             connector_bgr=theme["connector"],
-            on_confirm=lambda: self._start_draw_worker(is_full),
+            on_confirm=lambda: self._start_draw_worker_legacy(is_full),
         )
 
-    def _start_draw_worker(self, is_full: bool) -> None:
-        """プレビュー確定後の Excel 描画を非同期開始する。"""
+    def _start_draw_worker(self, snapshot_payload: Dict[str, Any]) -> None:
+        """プレビュー確定スナップショットから Excel 描画を非同期開始する。"""
+        threading.Thread(
+            target=self._worker_from_snapshot,
+            args=(snapshot_payload,),
+            daemon=True,
+        ).start()
+
+    def _start_draw_worker_legacy(self, is_full: bool) -> None:
+        """Canvas フォールバック確定後の描画（Excel 再読込）。"""
         threading.Thread(target=self._worker, args=(is_full,), daemon=True).start()
+
+    def _worker_from_snapshot(self, snapshot_payload: Dict[str, Any]) -> None:
+        """プレビュー確定スナップショットから描画（P2 · 表示＝作成）。"""
+        pythoncom.CoInitialize()
+        self.after(0, lambda: self._set_processing(True))
+
+        try:
+            theme = THEMES[self.var_theme.get()]
+            group_name = self.engine.draw_from_studio_payload(snapshot_payload, theme)
+
+            if self.stop_event.is_set():
+                self.after(0, lambda: messagebox.showinfo("中止", "描画処理を中止しました。"))
+            elif group_name:
+                self.engine.last_group_name = group_name
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo("完了", "フローチャートの作成が完了しました。"),
+                )
+
+        except Exception as e:
+            logger.exception("worker_snapshot_failed")
+            msg = (
+                f"【状況】生成処理が中断されました。\n"
+                f"【原因】{str(e)}\n"
+                f"【具体的アクション】Excelがセル編集中ではないか確認し、編集を終了させてから再試行してください。"
+            )
+            self.after(0, lambda: messagebox.showerror("エラー", msg))
+        finally:
+            self.after(0, lambda: self._set_processing(False))
+            pythoncom.CoUninitialize()
 
     def _worker(self, is_full: bool) -> None:
         """非同期実行用ワーカー（プレビュー確定後のみ呼ばれる）。
@@ -360,26 +569,39 @@ class FlowchartApp(ctk.CTk):
 
     def _poll_excel_status(self) -> None:
         """Excelの選択状態を監視してUIに反映。"""
+        self._refresh_status_line()
+        self.after(1000, self._poll_excel_status)
+
+    def _refresh_status_line(self) -> None:
+        """ステータス: ブック / シート / 範囲 / ライブ。"""
+        live_label = "ON" if self.preview_active else "OFF"
+        if self.is_processing:
+            return
         try:
             app = get_excel_app()
             if not app:
-                self.status_text.set("Excel未起動")
-            else:
-                sel = app.Selection
-                r = sel if sel.Count > 1 else sel.CurrentRegion
-                title, sheet = "未検出", app.ActiveSheet
-                for i in range(-5, 1):
-                    row_idx = max(1, r.Cells(1, 1).Row + i)
-                    c = sheet.Cells(row_idx, r.Cells(1, 1).Column)
-                    if c.Interior.Color == ExcelConstants.TITLE_BG_COLOR and c.Value:
-                        title = str(c.Value) if c.Value else "名称未設定"
-                        break
-                addr = sel.Address.replace('$', '')
-                self.status_text.set(f"対象: {title}\n範囲: {addr} ({r.Rows.Count}行)")
+                self.status_text.set(f"Excel未起動\nライブ {live_label}")
+                return
+
+            sel = app.Selection
+            r = sel if sel.Count > 1 else sel.CurrentRegion
+            sheet = app.ActiveSheet
+            workbook_name = str(sheet.Parent.Name)
+            sheet_name = str(sheet.Name)
+            title = "未検出"
+            for i in range(-5, 1):
+                row_idx = max(1, r.Cells(1, 1).Row + i)
+                c = sheet.Cells(row_idx, r.Cells(1, 1).Column)
+                if c.Interior.Color == ExcelConstants.TITLE_BG_COLOR and c.Value:
+                    title = str(c.Value) if c.Value else "名称未設定"
+                    break
+            addr = sel.Address.replace("$", "")
+            self.status_text.set(
+                f"{workbook_name} / {sheet_name}\n"
+                f"対象: {title} · {addr} ({r.Rows.Count}行) · ライブ {live_label}"
+            )
         except (AttributeError, pywintypes.com_error):
-            if not self.is_processing:
-                self.status_text.set("Excel操作中...")
-        self.after(1000, self._poll_excel_status)
+            self.status_text.set(f"Excel操作中...\nライブ {live_label}")
 
     def _create_template(self, mode: str) -> None:
         """10列 v2（flowchart-studio 互換）の雛形テーブルを生成。
@@ -625,25 +847,15 @@ class FlowchartApp(ctk.CTk):
         except (KeyError, AttributeError) as e:
             logger.warning(f"preset_highlight_update_failed | error={e}")
 
-    def _snap_left(self) -> None:
-        """ウィンドウを画面左端に移動する。"""
-        self.geometry(f"{self.winfo_width()}x{self.winfo_height()}+0+{self.winfo_y()}")
-
-    def _snap_right(self) -> None:
-        """ウィンドウを画面右端に移動する。"""
-        self.geometry(f"{self.winfo_width()}x{self.winfo_height()}+{self.winfo_screenwidth() - self.winfo_width()}+{self.winfo_y()}")
-
     def _toggle_help(self) -> None:
         """ヘルプ画面の表示/非表示を切り替える。"""
         self.is_help_mode = not self.is_help_mode
         if self.is_help_mode:
             self.content_frame.grid_remove()
             self.help_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
-            self.btn_help.configure(fg_color=FLOW_ACCENT, hover_color=FLOW_ACCENT_HOVER, text_color="white")
         else:
             self.help_frame.grid_remove()
             self.content_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
-            self.btn_help.configure(**STYLE_SECONDARY)
 
     def _create_help_widgets(self) -> None:
         """ヘルプ画面のウィジェットを作成する。"""
@@ -653,35 +865,20 @@ class FlowchartApp(ctk.CTk):
                              fg_color=FLOW_SURFACE, text_color=FLOW_TEXT_BODY,
                              border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER, corner_radius=CORNER_RADIUS)
         help_text = (
-            "1. Excelでフローチャートにしたい表を選択します。\n"
+            "1. Excel でフローチャートにしたい表を選択します。\n"
             "   (ID, 種別, 色, 接続先, 段, 列, Text...)\n\n"
-            "2. 「🚀 表全体を確認して作成」を押すと、\n"
-            "   flowchart-studio と同じ React Flow プレビューが\n"
-            "   開きます。問題なければ「Excelに作成」です。\n\n"
+            "2. 「表を読み込んでプレビュー」を押すと、\n"
+            "   同じウィンドウ内に flowchart-studio 同等の\n"
+            "   React Flow プレビューが表示されます。\n"
+            "   Excel を直すとライブで再描画されます。\n"
+            "   問題なければ下の「Excelに作成」です。\n\n"
             "3. 初回は preview-web で npm run build が必要です。\n\n"
-            "4. 「スマート・パレット」は選択セル位置に\n"
-            "   図形を直接置きます（プレビュー対象外）。\n\n"
-            "5. 作成中は「中止」で安全に停止できます。"
+            "4. 雛形・スマート・パレット・選択範囲は\n"
+            "   「その他 ▾」メニューにあります。\n\n"
+            "5. 寸法・テーマは「設定 ▾」から変更できます。"
         )
         txt.insert("0.0", help_text)
         txt.configure(state="disabled")
         txt.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         ctk.CTkButton(self.help_frame, text="戻る", command=self._toggle_help, corner_radius=CORNER_RADIUS,
                       **STYLE_SECONDARY).grid(row=2, column=0, pady=10)
-
-    def _toggle_mini_mode(self) -> None:
-        """ミニモードの表示/非表示を切り替える。"""
-        self.is_mini_mode = not self.is_mini_mode
-        if self.is_mini_mode:
-            if self.is_help_mode:
-                self._toggle_help()
-            self.geometry("400x120")
-            for child in self.content_frame.winfo_children():
-                if child != self.status_card:
-                    child.grid_remove()
-            self.btn_toggle.configure(text="大")
-        else:
-            self.geometry("400x850")
-            for child in self.content_frame.winfo_children():
-                child.grid()
-            self.btn_toggle.configure(text="小")
