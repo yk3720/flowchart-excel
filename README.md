@@ -90,6 +90,8 @@ python -m unittest discover -s tests -p "test_*.py"
 
 前提: 上記のとおり **`flowchart-studio` と `preview-web` の両方で `npm install` 済み**であること（`build_exe.py` が内部で `npm run build` を実行する）。
 
+**必須:** `.venv` の Python で `build_exe.py` を実行すること（脚本は `sys.executable -m PyInstaller` を使う）。PATH 上の素の `pyinstaller`（ストア版 Python 等）で固めると、**HTML は入るが `pywebview` が欠ける**ことがある → プレビューが開かない。
+
 ```powershell
 cd c:\yk-application\flowchart-studio
 npm install
@@ -98,6 +100,19 @@ cd c:\yk-application\flowchart-excel
 ```
 
 成果物: `dist\FlowchartExcel.exe`
+
+### ビルド後の簡易確認（プレビュー同梱）
+
+```powershell
+# warn に webview missing が無いこと
+Select-String -Path .\build\FlowchartExcel\warn-FlowchartExcel.txt -Pattern 'missing module named webview'
+
+# 子プロセスが pywebview missing (exit 2) で即死しないこと（ダミー JSON 可）
+.\dist\FlowchartExcel.exe --flowchart-preview payload.json result.json .\preview-web\dist
+# 期待: プレビュー窓が開く / 少なくとも result.json が "pywebview missing" でない
+```
+
+詳細（再発防止の SSOT）: `yk-skill/rule/40_python/PYTHON_RULES.md` §13「PyInstaller は venv の Python 経由」
 
 ## 関連ドキュメント
 
