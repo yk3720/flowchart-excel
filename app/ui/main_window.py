@@ -92,11 +92,13 @@ class FlowchartApp(ctk.CTk):
     def _setup_window(self) -> None:
         """ウィンドウの基本属性設定。"""
         if self._use_embedded:
-            self.geometry("1100x820+50+50")
-            self.minsize(720, 600)
+            # 縦長フロー向け: 旧 1100 幅の約 1/3 · Excel 作業中も前面維持
+            self.geometry("370x820+50+50")
+            self.minsize(320, 500)
         else:
             self.geometry("400x240+50+50")
             self.minsize(350, 180)
+        self.attributes("-topmost", True)
         self.grid_columnconfigure(0, weight=1)
 
     def _create_header(self) -> None:

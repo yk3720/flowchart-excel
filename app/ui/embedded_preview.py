@@ -16,6 +16,10 @@ from app.ui.studio_preview import resolve_preview_dist
 
 logger = logging.getLogger("flowchart-excel")
 
+# 注入リトライ（setPreviewPayload 準備待ち · evaluate 失敗時）
+_INJECT_RETRY_MS = 200
+_INJECT_RETRY_MAX = 25
+
 
 def _ensure_pywebview_compat() -> None:
     """pywebview 5+/6+ 互換のプレースホルダ（将来の EdgeChrome 差分用）。"""
@@ -26,7 +30,7 @@ def _ensure_pywebview_compat() -> None:
 
 
 def _ensure_tkwebview2_compat() -> None:
-    """tkwebview2 が pywebview 5+/6+ の EdgeChrome.webview API に追随していない修正。"""
+    """tkwebview2 が pywebview 5+/6+ の EdgeChrome API に追随していない修正。"""
     _ensure_pywebview_compat()
     try:
         from tkwebview2 import tkwebview2 as tkv_mod
@@ -97,7 +101,18 @@ def _ensure_tkwebview2_compat() -> None:
         self.core = None
         self.web.CoreWebView2InitializationCompleted += self._WebView2__load_core
 
+    def _fixed_evaluate_js(self: Any, script: str, callback: Any = None) -> Any:
+        """pywebview 5+: EdgeChrome.evaluate_js(script, parse_json) に合わせる。
+
+        旧 tkwebview2 は (script, semaphore, js_r) を渡しており TypeError で注入失敗する。
+        """
+        result = self.web_view.evaluate_js(script, False)
+        if callback is not None:
+            callback(result)
+        return result
+
     tkv_mod.WebView2.__init__ = _fixed_webview2_init  # type: ignore[method-assign]
+    tkv_mod.WebView2.evaluate_js = _fixed_evaluate_js  # type: ignore[method-assign]
     tkv_mod._yk_tkwebview2_compat = True
 
 
@@ -136,14 +151,19 @@ class EmbeddedStudioPreview:
         self._live = False
         self._core_ready = False
         self._page_loaded = False
+        self._inject_retries = 0
+        self._pending_main_work = False
+        self._pump_alive = True
 
         self._host = tk.Frame(master, highlightthickness=0)
         self._host.pack(fill="both", expand=True)
-
-        self._frame = WebView2(self._host, width=800, height=480)
+        # 初期 HWND は親より小さく（airspace 防止）。
+        # __init__ 中の update*/winfo 禁止。CLR/loaded コールバックからも Tk を触らない。
+        self._frame = WebView2(self._host, width=320, height=480)
         self._frame.pack(fill="both", expand=True)
-        self._frame.event_core_completed(self._on_core_ready)
-        self._frame.loaded += self._on_page_loaded
+        self._frame.event_core_completed(self._on_core_ready_clr)
+        self._frame.loaded += self._on_page_loaded_bg
+        self._schedule_after(50, self._main_pump)
 
         if self._dist is None:
             logger.warning("embedded_preview_dist_missing")
@@ -172,6 +192,7 @@ class EmbeddedStudioPreview:
         payload["meta"] = meta
         self._payload = payload
         self._fp = table_fingerprint(payload)
+        self._inject_retries = 0
         self._inject(payload)
         self.start_live()
         if self._on_payload_change:
@@ -201,23 +222,72 @@ class EmbeddedStudioPreview:
             return False
         return bool((self._payload.get("meta") or {}).get("nodeCount", 0))
 
-    def _on_core_ready(self, sender: Any, _args: Any) -> None:
-        self._core_ready = True
-        if self._payload and self._page_loaded:
-            self._inject(self._payload)
+    def _sync_webview_size(self) -> None:
+        try:
+            from tkwebview2.tkwebview2 import user32
 
-    def _on_page_loaded(self) -> None:
+            w = max(1, self._frame.winfo_width())
+            h = max(1, self._frame.winfo_height())
+            user32.MoveWindow(int(self._frame.chwnd), 0, 0, w, h, True)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("embedded_webview_resize_skip | %s", exc)
+
+    def _on_core_ready_clr(self, sender: Any, _args: Any) -> None:
+        """WinForms/CLR スレッド。Tk・winfo・after は呼ばない。"""
+        self._core_ready = True
+        self._pending_main_work = True
+
+    def _on_page_loaded_bg(self) -> None:
+        """pywebview loaded は別スレッドで発火しうる。Tk は触らない。"""
         self._page_loaded = True
-        if self._payload:
-            self._inject(self._payload)
+        self._pending_main_work = True
+
+    def _main_pump(self) -> None:
+        """Tk メインスレッド専用: リサイズ・注入をここでのみ実行。"""
+        if not self._pump_alive:
+            return
+        # core が CLR 側で後から付く場合のポーリング
+        if not self._core_ready:
+            core = getattr(self._frame, "core", None)
+            if core is None:
+                core = getattr(getattr(self._frame, "web", None), "CoreWebView2", None)
+            if core is not None:
+                self._core_ready = True
+                self._pending_main_work = True
+        if self._pending_main_work:
+            self._pending_main_work = False
+            self._sync_webview_size()
+            if self._payload and self._core_ready:
+                self._inject(self._payload)
+        self._schedule_after(100, self._main_pump)
 
     def _inject(self, payload: Dict[str, Any]) -> None:
-        if not self._core_ready or not self._page_loaded:
+        """Core 準備後に JS 注入（Tk メインスレッドから呼ぶ）。"""
+        if not self._core_ready:
+            self._pending_main_work = True
             return
+        js = build_payload_inject_js(payload)
         try:
-            self._frame.evaluate_js(build_payload_inject_js(payload))
+            core = getattr(self._frame, "core", None)
+            if core is None:
+                core = getattr(self._frame.web, "CoreWebView2", None)
+            if core is not None:
+                core.ExecuteScriptAsync(js)
+                logger.info(
+                    "embedded_inject_ok | nodes=%s",
+                    (payload.get("meta") or {}).get("nodeCount"),
+                )
+                return
+            self._frame.evaluate_js(js)
+            logger.info(
+                "embedded_inject_ok_via_evaluate | nodes=%s",
+                (payload.get("meta") or {}).get("nodeCount"),
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("embedded_inject_failed | %s", exc)
+            logger.warning("embedded_inject_failed | %s", exc)
+            if self._inject_retries < _INJECT_RETRY_MAX:
+                self._inject_retries += 1
+                self._schedule_after(_INJECT_RETRY_MS, lambda: self._inject(payload))
 
     def _schedule_live(self) -> None:
         if not self._live:
@@ -241,6 +311,7 @@ class EmbeddedStudioPreview:
                     "embedded_live_updated | nodes=%s",
                     (fresh.get("meta") or {}).get("nodeCount"),
                 )
+                self._inject_retries = 0
                 self._inject(fresh)
                 if self._on_payload_change:
                     self._on_payload_change()
