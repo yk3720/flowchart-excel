@@ -103,6 +103,7 @@ export function App() {
               nodes={rf.nodes}
               edges={rf.edges}
               fillContainer
+              autoFitView={false}
               onViewportZoomChange={setZoomPercent}
             />
             <div className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-1 rounded-md border border-flow-border bg-flow-surface px-2 py-1 text-xs text-flow-text-body shadow-sm">
