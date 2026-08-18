@@ -20,9 +20,11 @@ build/
 dist/
 *.spec
 
-# 実行時生成
-logs/
-output/
+# 実行時生成（ディレクトリ骨格は .gitkeep で維持）
+logs/*
+!logs/.gitkeep
+output/*
+!output/.gitkeep
 temp/
 
 # preview-web
