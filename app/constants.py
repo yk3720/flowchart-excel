@@ -25,6 +25,9 @@ TABLE_HEADERS_10_V2: List[str] = [
     "Text3",
 ]
 
+# 雛形の図形種別ドロップダウン。SSOT: flowchart-studio SHAPE_TYPE_OPTIONS
+SHAPE_TYPE_VALIDATION = "端子,処理,判断,入出力,手動入力,〇"
+
 
 class ExcelConstants:
     """Excel COM 定数。"""
@@ -33,6 +36,7 @@ class ExcelConstants:
     MSOSHAPE_DIAMOND = 4
     MSOSHAPE_PARALLELOGRAM = 2
     MSOSHAPE_ROUNDED_RECTANGLE = 5
+    MSOSHAPE_OVAL = 9
     MSOSHAPE_MANUAL_INPUT = 11
 
     MSOCONNECTOR_STRAIGHT = 1

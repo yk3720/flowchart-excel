@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 import pywintypes
 
 from app.constants import ExcelConstants, FONT_FAMILY
+from app.core.flow_colors import fill_vba_rgb_for_hint
 from app.core.layout_preview import compute_layout
 
 logger = logging.getLogger("flowchart-excel")
@@ -19,6 +20,7 @@ _SHAPE_CODE = {
     "roundrect": ExcelConstants.MSOSHAPE_ROUNDED_RECTANGLE,
     "parallelogram": ExcelConstants.MSOSHAPE_PARALLELOGRAM,
     "manual": ExcelConstants.MSOSHAPE_MANUAL_INPUT,
+    "oval": ExcelConstants.MSOSHAPE_OVAL,
 }
 
 
@@ -56,7 +58,7 @@ def place_shapes(
             item.width,
             item.height,
         )
-        shp.Fill.ForeColor.RGB = 0xFFFFFF
+        shp.Fill.ForeColor.RGB = fill_vba_rgb_for_hint(item.color_hint)
         shp.Line.ForeColor.RGB = theme["shape_line"]
 
         if item.is_diamond:

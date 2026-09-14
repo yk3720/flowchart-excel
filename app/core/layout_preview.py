@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-ShapeKind = Literal["rect", "diamond", "roundrect", "parallelogram", "manual"]
+ShapeKind = Literal["rect", "diamond", "roundrect", "parallelogram", "manual", "oval"]
 
 
 @dataclass
@@ -28,6 +28,7 @@ class PlacedNode:
     is_diamond: bool
     dests_down: List[str] = field(default_factory=list)
     dests_right: List[str] = field(default_factory=list)
+    color_hint: Optional[str] = None
 
 
 @dataclass
@@ -60,6 +61,8 @@ def _node_tier(node: Dict[str, Any]) -> int:
 def _shape_kind(stype: str) -> Tuple[ShapeKind, bool]:
     if "判断" in stype:
         return "diamond", True
+    if any(x in stype for x in ("〇", "○", "省略記号")):
+        return "oval", False
     if any(x in stype for x in ["端子", "開始", "終了"]):
         return "roundrect", False
     if any(x in stype for x in ["入出力", "データ"]):
@@ -122,12 +125,23 @@ def compute_layout(
             current_top += prev["height"] + gv
 
         for node in sorted(bucket["nodes"], key=lambda n: (n["level"], n["id"])):
-            left_pos = base_left + node["level"] * (w_fix + gh)
+            cell_left = base_left + node["level"] * (w_fix + gh)
             kind, is_diamond = _shape_kind(str(node["type"]))
             row_h = float(bucket["height"])
-            shp_h = row_h * 1.3 if is_diamond else row_h
-            v_off = (shp_h - row_h) / 2 if is_diamond else 0.0
-            top_pos = current_top - v_off
+            if kind == "oval":
+                shp_w = min(w_fix, row_h)
+                shp_h = shp_w
+                left_pos = cell_left + (w_fix - shp_w) / 2
+                top_pos = current_top
+            else:
+                shp_w = w_fix
+                shp_h = row_h * 1.3 if is_diamond else row_h
+                v_off = (shp_h - row_h) / 2 if is_diamond else 0.0
+                left_pos = cell_left
+                top_pos = current_top - v_off
+
+            color_raw = node.get("color_hint")
+            color_hint = str(color_raw).strip() if color_raw not in (None, "") else None
 
             placed.append(
                 PlacedNode(
@@ -138,17 +152,18 @@ def compute_layout(
                     tier=tier,
                     left=left_pos,
                     top=top_pos,
-                    width=w_fix,
+                    width=shp_w,
                     height=shp_h,
                     shape_kind=kind,
                     is_diamond=is_diamond,
                     dests_down=list(node.get("dests_down") or []),
                     dests_right=list(node.get("dests_right") or []),
+                    color_hint=color_hint,
                 )
             )
             l_list.append(left_pos)
             t_list.append(top_pos)
-            r_list.append(left_pos + w_fix)
+            r_list.append(left_pos + shp_w)
             b_list.append(top_pos + shp_h)
 
         last_tier = tier

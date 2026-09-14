@@ -26,6 +26,7 @@ from app.constants import (
     DEFAULT_GAP_V,
     DEFAULT_GAP_H,
     ExcelConstants,
+    SHAPE_TYPE_VALIDATION,
     TEMPLATE_DATA,
     REVISION,
     TABLE_HEADERS_10_V2,
@@ -159,6 +160,7 @@ class FlowchartApp(ctk.CTk):
             ("判断", "判断"),
             ("入出力", "入出力"),
             ("手動入力", "手動入力"),
+            ("〇", "〇"),
         ]:
             menu_palette.add_command(
                 label=label, command=lambda s=stype: self._smart_input(s)
@@ -657,7 +659,7 @@ class FlowchartApp(ctk.CTk):
             
             v_range = sheet.Range(sheet.Cells(r+1, c+1), sheet.Cells(r+100, c+1))
             v_range.Validation.Delete()
-            v_range.Validation.Add(3, 1, 1, "端子,処理,判断,入出力,手動入力")
+            v_range.Validation.Add(3, 1, 1, SHAPE_TYPE_VALIDATION)
             
             messagebox.showinfo("完了", "雛形を作成しました。")
         except (pywintypes.com_error, AttributeError) as e:
@@ -668,7 +670,7 @@ class FlowchartApp(ctk.CTk):
         """スマート・パレットボタンクリックでExcel上に直接図形を生成する。
         
         Args:
-            stype (str): 図形種別（"端子", "処理", "判断", "入出力", "手動入力"）。
+            stype (str): 図形種別（"端子", "処理", "判断", "入出力", "手動入力", "〇"）。
         """
         app = get_excel_app()
         if not app:
@@ -693,6 +695,8 @@ class FlowchartApp(ctk.CTk):
             if "判断" in stype:
                 stype_code = ExcelConstants.MSOSHAPE_DIAMOND
                 is_diamond = True
+            elif any(x in stype for x in ("〇", "○", "省略記号")):
+                stype_code = ExcelConstants.MSOSHAPE_OVAL
             elif any(x in stype for x in ["端子", "開始", "終了"]):
                 stype_code = ExcelConstants.MSOSHAPE_ROUNDED_RECTANGLE
             elif any(x in stype for x in ["入出力", "データ"]):
@@ -708,6 +712,10 @@ class FlowchartApp(ctk.CTk):
             # 判断図形の場合は高さを1.3倍
             if is_diamond:
                 height = height * 1.3
+            elif stype_code == ExcelConstants.MSOSHAPE_OVAL:
+                side = min(width, height)
+                width = side
+                height = side
             
             # 5. 図形を生成
             shp = sheet.Shapes.AddShape(stype_code, left_pos, top_pos, width, height)

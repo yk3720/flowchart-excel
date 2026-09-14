@@ -27,6 +27,10 @@ _SHAPE_ALIASES = {
 }
 
 
+def _is_oval_type(text: str) -> bool:
+    return any(token in text for token in ("〇", "○", "省略記号"))
+
+
 def norm_id(value: Any) -> str:
     if value is None or value == "":
         return ""
@@ -50,6 +54,10 @@ def split_dests(value: Any) -> List[str]:
 
 def normalize_shape_type(raw: Any) -> str:
     text = str(raw).strip() if raw not in (None, "") else "処理"
+    if "判断" in text:
+        return "判断"
+    if _is_oval_type(text):
+        return "〇"
     for key, mapped in _SHAPE_ALIASES.items():
         if key in text:
             return mapped

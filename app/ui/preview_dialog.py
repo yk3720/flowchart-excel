@@ -23,6 +23,7 @@ from app.constants import (
     LABEL_FONT,
     SMALL_FONT,
 )
+from app.core.flow_colors import fill_hex_for_hint
 from app.core.layout_preview import PlacedNode, PreviewModel
 
 # 枠線太さ SSOT（同一プレビュー内で統一 · VISUAL_DESIGN_RULES）
@@ -281,7 +282,7 @@ class FlowPreviewDialog(ctk.CTkToplevel):
         w = node.width * scale
         h = node.height * scale
         stroke = self._shape_line
-        fill = "#ffffff"
+        fill = fill_hex_for_hint(node.color_hint)
 
         if node.shape_kind == "diamond":
             canvas.create_polygon(
@@ -301,6 +302,16 @@ class FlowPreviewDialog(ctk.CTkToplevel):
         elif node.shape_kind == "manual":
             canvas.create_polygon(
                 [x + w * 0.15, y, x + w, y, x + w, y + h, x, y + h],
+                outline=stroke,
+                fill=fill,
+                width=PREVIEW_STROKE,
+            )
+        elif node.shape_kind == "oval":
+            canvas.create_oval(
+                x,
+                y,
+                x + w,
+                y + h,
                 outline=stroke,
                 fill=fill,
                 width=PREVIEW_STROKE,
