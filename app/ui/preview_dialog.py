@@ -52,7 +52,7 @@ class FlowPreviewDialog(ctk.CTkToplevel):
         on_confirm: Callable[[], None],
     ) -> None:
         super().__init__(master)
-        self.title("フロープレビュー — 確認してから作成")
+        self.title("フロープレビュー（簡易表示）— 確認してから作成")
         self.configure(fg_color=FLOW_SURFACE_MUTED)
         self.geometry("920x640")
         self.minsize(640, 480)

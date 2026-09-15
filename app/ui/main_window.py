@@ -11,8 +11,7 @@ import pywintypes
 import logging
 from typing import Dict, Optional, Any
 from app.core.excel_engine import ExcelFlowchartEngine, get_excel_app
-from app.core.shape_placer import set_text_style
-from app.core.connector_manager import add_decision_label
+from app.core.smart_palette import create_smart_shape
 from app.ui.preview_dialog import FlowPreviewDialog
 from app.ui.embedded_preview import EmbeddedStudioPreview, embedded_preview_available
 from app.ui.studio_preview import run_studio_preview
@@ -21,6 +20,7 @@ from app.constants import (
     FLOW_ACCENT, FLOW_ACCENT_HOVER, FLOW_SURFACE, FLOW_SURFACE_MUTED, FLOW_SURFACE_SUBTLE,
     FLOW_BORDER, FLOW_BORDER_STRONG, FLOW_TEXT, FLOW_TEXT_BODY, FLOW_TEXT_MUTED,
     FLOW_DANGER, FLOW_DANGER_HOVER, FLOW_SUCCESS_BG, FLOW_SUCCESS_BORDER, FLOW_SUCCESS_TEXT,
+    FLOW_WARNING_SOLID, FLOW_WARNING_SOLID_HOVER, FLOW_WARNING_TEXT,
     CARD_BORDER_WIDTH,
     CORNER_RADIUS, THEMES, PRESETS, DEFAULT_BOX_HEIGHT, DEFAULT_BOX_WIDTH,
     DEFAULT_GAP_V,
@@ -41,6 +41,9 @@ STYLE_SECONDARY = dict(
 )
 STYLE_PRIMARY = dict(fg_color=FLOW_ACCENT, hover_color=FLOW_ACCENT_HOVER, text_color="white")
 STYLE_DESTRUCTIVE = dict(fg_color=FLOW_DANGER, hover_color=FLOW_DANGER_HOVER, text_color="white")
+STYLE_WARNING = dict(
+    fg_color=FLOW_WARNING_SOLID, hover_color=FLOW_WARNING_SOLID_HOVER, text_color=FLOW_WARNING_TEXT,
+)
 STYLE_CARD = dict(fg_color=FLOW_SURFACE, border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER)
 
 
@@ -70,7 +73,8 @@ class FlowchartApp(ctk.CTk):
         self.preset_buttons: Dict[str, ctk.CTkButton] = {}
         self._embedded_preview: Optional[EmbeddedStudioPreview] = None
         self._use_embedded = embedded_preview_available()
-        
+        logger.info("preview_route_selected | embedded=%s", self._use_embedded)
+
         self._setup_window()
         self._create_header()
         self._create_menus()
@@ -303,6 +307,17 @@ class FlowchartApp(ctk.CTk):
             f_actions.grid(row=3, column=0, padx=0, pady=(0, 4), sticky="ew")
             f_actions.grid_columnconfigure(0, weight=1)
             f_actions.grid_columnconfigure(1, weight=1)
+            self.btn_cancel_preview = ctk.CTkButton(
+                f_actions,
+                text="キャンセル",
+                command=self._cancel_preview,
+                corner_radius=CORNER_RADIUS,
+                font=(FONT_FAMILY, 14, "bold"),
+                height=48,
+                state="disabled",
+                **STYLE_SECONDARY,
+            )
+            self.btn_cancel_preview.grid(row=0, column=0, padx=(0, 8), sticky="ew")
             self.btn_create = ctk.CTkButton(
                 f_actions,
                 text="Excelに作成",
@@ -318,6 +333,7 @@ class FlowchartApp(ctk.CTk):
             f_actions.grid(row=1, column=0, padx=0, pady=(10, 5), sticky="ew")
             f_actions.grid_columnconfigure(0, weight=1)
             self.btn_create = None
+            self.btn_cancel_preview = None
 
         self.btn_cancel = ctk.CTkButton(
             f_actions, text="✋ 中止", command=self._cancel_generation,
@@ -348,9 +364,19 @@ class FlowchartApp(ctk.CTk):
         self.status_text.set("🛑 中止しています...")
         self.btn_cancel.configure(state="disabled")
 
+    def _cancel_preview(self) -> None:
+        """埋め込みプレビューを破棄し、読込前の状態に戻す。"""
+        if self.is_processing or not self.preview_active:
+            return
+        if self._embedded_preview is not None:
+            self._embedded_preview.clear_session()
+        self.preview_active = False
+        self._refresh_status_line()
+        self._update_create_button_state()
+
     def _set_processing(self, state: bool) -> None:
         """処理中状態に応じたUIの切り替え。
-        
+
         Args:
             state (bool): 処理中の場合True、処理完了の場合False。
         """
@@ -362,13 +388,15 @@ class FlowchartApp(ctk.CTk):
                 self.btn_create.configure(state="disabled")
             else:
                 self._update_create_button_state()
-        
+
         if state:
             if self._embedded_preview is not None:
                 self._embedded_preview.stop_live()
             self.btn_preview.grid_remove()
             if self.btn_create is not None:
                 self.btn_create.grid_remove()
+            if self.btn_cancel_preview is not None:
+                self.btn_cancel_preview.grid_remove()
             self.btn_cancel.grid(row=0, column=0, columnspan=2, sticky="ew")
             self.btn_cancel.configure(state="normal")
             self.status_text.set("🚀 生成中...")
@@ -376,6 +404,8 @@ class FlowchartApp(ctk.CTk):
         else:
             self.btn_cancel.grid_remove()
             self.btn_preview.grid(row=0, column=0, sticky="ew")
+            if self._use_embedded and self.btn_cancel_preview is not None:
+                self.btn_cancel_preview.grid(row=0, column=0, padx=(0, 8), sticky="ew")
             if self._use_embedded and self.btn_create is not None:
                 self.btn_create.grid(row=0, column=1, padx=(8, 0), sticky="ew")
             if self._embedded_preview is not None and self.preview_active:
@@ -391,7 +421,14 @@ class FlowchartApp(ctk.CTk):
         }
 
     def _update_create_button_state(self) -> None:
-        if self.btn_create is None or self.is_processing:
+        if self.is_processing:
+            return
+        if self.btn_cancel_preview is not None:
+            if self.preview_active:
+                self.btn_cancel_preview.configure(state="normal", **STYLE_WARNING)
+            else:
+                self.btn_cancel_preview.configure(state="disabled", **STYLE_SECONDARY)
+        if self.btn_create is None:
             return
         enabled = (
             self.preview_active
@@ -466,10 +503,10 @@ class FlowchartApp(ctk.CTk):
         if result is False:
             return
 
-        # dist 未ビルド時は従来 Canvas にフォールバック
+        # dist 未ビルド時は従来 Canvas にフォールバック（表示＝作成: 同じ payload から描画）
         logger.warning("studio_preview_fallback_canvas")
         try:
-            model = self.engine.build_preview(is_full, config)
+            model = self.engine.build_preview_from_payload(payload)
         except Exception as e:
             logger.exception("canvas_preview_failed")
             messagebox.showerror(
@@ -478,19 +515,13 @@ class FlowchartApp(ctk.CTk):
                 "preview-web で npm run build を実行してください。",
             )
             return
-        if not model.nodes:
-            messagebox.showwarning(
-                "データなし",
-                "有効なノードがありません。ID が数値の行があるか確認してください。",
-            )
-            return
         theme = THEMES[self.var_theme.get()]
         FlowPreviewDialog(
             self,
             model,
             shape_line_bgr=theme["shape_line"],
             connector_bgr=theme["connector"],
-            on_confirm=lambda: self._start_draw_worker_legacy(is_full),
+            on_confirm=lambda: self._start_draw_worker(payload),
         )
 
     def _start_draw_worker(self, snapshot_payload: Dict[str, Any]) -> None:
@@ -500,10 +531,6 @@ class FlowchartApp(ctk.CTk):
             args=(snapshot_payload,),
             daemon=True,
         ).start()
-
-    def _start_draw_worker_legacy(self, is_full: bool) -> None:
-        """Canvas フォールバック確定後の描画（Excel 再読込）。"""
-        threading.Thread(target=self._worker, args=(is_full,), daemon=True).start()
 
     def _worker_from_snapshot(self, snapshot_payload: Dict[str, Any]) -> None:
         """プレビュー確定スナップショットから描画（P2 · 表示＝作成）。"""
@@ -525,42 +552,6 @@ class FlowchartApp(ctk.CTk):
 
         except Exception as e:
             logger.exception("worker_snapshot_failed")
-            msg = (
-                f"【状況】生成処理が中断されました。\n"
-                f"【原因】{str(e)}\n"
-                f"【具体的アクション】Excelがセル編集中ではないか確認し、編集を終了させてから再試行してください。"
-            )
-            self.after(0, lambda: messagebox.showerror("エラー", msg))
-        finally:
-            self.after(0, lambda: self._set_processing(False))
-            pythoncom.CoUninitialize()
-
-    def _worker(self, is_full: bool) -> None:
-        """非同期実行用ワーカー（プレビュー確定後のみ呼ばれる）。
-
-        Args:
-            is_full (bool): 表全体から生成する場合True、選択範囲のみの場合False。
-        """
-        pythoncom.CoInitialize()
-        self.after(0, lambda: self._set_processing(True))
-
-        try:
-            config = self._current_config()
-            theme = THEMES[self.var_theme.get()]
-
-            group_name = self.engine.draw(is_full, config, theme)
-
-            if self.stop_event.is_set():
-                self.after(0, lambda: messagebox.showinfo("中止", "描画処理を中止しました。"))
-            elif group_name:
-                self.engine.last_group_name = group_name
-                self.after(
-                    0,
-                    lambda: messagebox.showinfo("完了", "フローチャートの作成が完了しました。"),
-                )
-
-        except Exception as e:
-            logger.exception("worker_failed")
             msg = (
                 f"【状況】生成処理が中断されました。\n"
                 f"【原因】{str(e)}\n"
@@ -668,7 +659,10 @@ class FlowchartApp(ctk.CTk):
 
     def _smart_input(self, stype: str) -> None:
         """スマート・パレットボタンクリックでExcel上に直接図形を生成する。
-        
+
+        図形・コネクタ・グループ化のロジックは `app/core/smart_palette.py` に集約。
+        生成物は常に1グループにまとめられ、Undo（↩）の対象になる。
+
         Args:
             stype (str): 図形種別（"端子", "処理", "判断", "入出力", "手動入力", "〇"）。
         """
@@ -676,160 +670,59 @@ class FlowchartApp(ctk.CTk):
         if not app:
             messagebox.showwarning("警告", "Excelを起動してください。")
             return
-        
+
         try:
-            # 1. Excel上で選択セルの位置を取得
-            sel = app.Selection
-            sheet = app.ActiveSheet
-            
-            # 2. 選択セルの座標（Left, Top）を基準位置として使用
-            cell = sel.Cells(1, 1)
-            left_pos = float(cell.Left)
-            top_pos = float(cell.Top)
-            
-            # 3. ボタン種別に応じた図形種別コードを決定
-            stype_code = ExcelConstants.MSOSHAPE_RECTANGLE
-            is_diamond = False
-            is_manual = False
-            
-            if "判断" in stype:
-                stype_code = ExcelConstants.MSOSHAPE_DIAMOND
-                is_diamond = True
-            elif any(x in stype for x in ("〇", "○", "省略記号")):
-                stype_code = ExcelConstants.MSOSHAPE_OVAL
-            elif any(x in stype for x in ["端子", "開始", "終了"]):
-                stype_code = ExcelConstants.MSOSHAPE_ROUNDED_RECTANGLE
-            elif any(x in stype for x in ["入出力", "データ"]):
-                stype_code = ExcelConstants.MSOSHAPE_PARALLELOGRAM
-            elif "手動入力" in stype:
-                stype_code = ExcelConstants.MSOSHAPE_MANUAL_INPUT
-                is_manual = True
-            
-            # 4. 現在の設定値（var_height, var_width）を使用して図形サイズを決定
-            width = self.var_width.get()
-            height = self.var_height.get()
-            
-            # 判断図形の場合は高さを1.3倍
-            if is_diamond:
-                height = height * 1.3
-            elif stype_code == ExcelConstants.MSOSHAPE_OVAL:
-                side = min(width, height)
-                width = side
-                height = side
-            
-            # 5. 図形を生成
-            shp = sheet.Shapes.AddShape(stype_code, left_pos, top_pos, width, height)
-            
-            # スタイル設定
-            shp.Fill.ForeColor.RGB = 0xFFFFFF
-            theme = THEMES[self.var_theme.get()]
-            shp.Line.ForeColor.RGB = theme["shape_line"]
-            
-            # テキスト設定（プレースホルダーテキスト「XXXX」）
-            set_text_style(shp, "XXXX", is_manual=is_manual)
-            
-            # 6. コネクタを生成（rev013追加、rev014継承）
-            # すべての図形の下側からカギ付き矢印コネクタを生成
-            # コネクタの終点を設定するため、一時的な図形を作成して接続（非表示のまま保持）
-            temp_bottom_left = left_pos + width / 2  # 図形の下側中央
-            temp_bottom_top = top_pos + height + height  # 図形の下側から高さ分下
-            temp_bottom = sheet.Shapes.AddShape(ExcelConstants.MSOSHAPE_RECTANGLE, 
-                                                temp_bottom_left, temp_bottom_top, 1, 1)
-            temp_bottom.Visible = False  # 非表示（コネクタ接続のために保持）
-            temp_bottom.Line.Visible = False  # 枠線も非表示
-            temp_bottom.Fill.Visible = False  # 塗りつぶしも非表示
-            
-            try:
-                # 下側コネクタを作成
-                conn_bottom = sheet.Shapes.AddConnector(ExcelConstants.MSOCONNECTOR_ELBOW, 0, 0, 10, 10)
-                conn_bottom.ConnectorFormat.BeginConnect(shp, ExcelConstants.CONNECTOR_SITE_BOTTOM)
-                conn_bottom.ConnectorFormat.EndConnect(temp_bottom, ExcelConstants.CONNECTOR_SITE_TOP)
-                conn_bottom.Line.ForeColor.RGB = theme["connector"]
-                conn_bottom.Line.Weight = 2.25
-                conn_bottom.Line.EndArrowheadStyle = 3
-                
-                # 判断図形の場合は下側コネクタに「Yes」ラベルを配置
-                lbl_yes = None
-                lbl_no = None
-                if is_diamond:
-                    lbl_yes = add_decision_label(sheet, shp, "down")
-                    if not lbl_yes:
-                        logger.warning("decision_label_yes_creation_failed")
-                
-                # 判断図形の場合は右側からもコネクタを生成
-                if is_diamond:
-                    temp_right_left = left_pos + width + width  # 図形の右側から幅分右
-                    temp_right_top = top_pos + height / 2  # 図形の中央
-                    temp_right = sheet.Shapes.AddShape(ExcelConstants.MSOSHAPE_RECTANGLE,
-                                                       temp_right_left, temp_right_top, 1, 1)
-                    temp_right.Visible = False  # 非表示（コネクタ接続のために保持）
-                    temp_right.Line.Visible = False  # 枠線も非表示
-                    temp_right.Fill.Visible = False  # 塗りつぶしも非表示
-                    
-                    try:
-                        # 右側コネクタを作成
-                        conn_right = sheet.Shapes.AddConnector(ExcelConstants.MSOCONNECTOR_ELBOW, 0, 0, 10, 10)
-                        conn_right.ConnectorFormat.BeginConnect(shp, ExcelConstants.CONNECTOR_SITE_RIGHT)
-                        conn_right.ConnectorFormat.EndConnect(temp_right, ExcelConstants.CONNECTOR_SITE_LEFT)
-                        conn_right.Line.ForeColor.RGB = theme["connector"]
-                        conn_right.Line.Weight = 2.25
-                        conn_right.Line.EndArrowheadStyle = 3
-                        
-                        # 判断図形の右側コネクタに「No」ラベルを配置
-                        lbl_no = add_decision_label(sheet, shp, "right")
-                        if not lbl_no:
-                            logger.warning("decision_label_no_creation_failed")
-                    except (pywintypes.com_error, AttributeError) as e:
-                        logger.error(f"right_connector_creation_failed | error={e}")
-                
-                # 判断図形の場合は図形とYes/Noラベルをグループ化
-                if is_diamond:
-                    try:
-                        group_names = [shp.Name]
-                        if lbl_yes:
-                            group_names.append(lbl_yes)
-                        if lbl_no:
-                            group_names.append(lbl_no)
-                        
-                        if len(group_names) > 1:
-                            decision_group = sheet.Shapes.Range(tuple(group_names)).Group()
-                            logger.info(f"decision_group_created | group_name={decision_group.Name} | members={group_names}")
-                    except (pywintypes.com_error, AttributeError) as e:
-                        logger.error(f"decision_grouping_failed | error={e}")
-                
-            except (pywintypes.com_error, AttributeError) as e:
-                logger.error(f"bottom_connector_creation_failed | error={e}")
-            
-            logger.info(f"smart_palette_shape_created | type={stype} | position=({left_pos}, {top_pos}) | size=({width}, {height})")
-            
+            cell = app.Selection.Cells(1, 1)
+            group_name = create_smart_shape(
+                app.ActiveSheet,
+                stype,
+                float(cell.Left),
+                float(cell.Top),
+                self.var_width.get(),
+                self.var_height.get(),
+                THEMES[self.var_theme.get()],
+            )
         except (pywintypes.com_error, AttributeError) as e:
             logger.error(f"smart_input_failed | error={e}")
             messagebox.showerror("エラー", f"図形の生成に失敗しました: {e}")
+            return
+
+        if group_name:
+            self.engine.last_group_name = group_name
+        else:
+            messagebox.showwarning(
+                "警告",
+                "図形は生成しましたが、グループ化に失敗しました。↩ Undo の対象外です。",
+            )
 
     def _undo_last(self) -> None:
         """直前の描画グループを削除する。"""
-        if not self.engine.last_group_name: 
+        if not self.engine.last_group_name:
             return
         try:
             get_excel_app().ActiveSheet.Shapes(self.engine.last_group_name).Delete()
             self.engine.last_group_name = None
         except (pywintypes.com_error, AttributeError) as e:
             logger.warning(f"undo_failed | error={e}")
+            messagebox.showerror("エラー", f"取り消しに失敗しました: {e}")
 
     def _clear_canvas(self) -> None:
         """シート上の全図形を削除する。"""
-        if not messagebox.askyesno("確認", "全ての図形を削除しますか？"): 
+        if not messagebox.askyesno("確認", "全ての図形を削除しますか？"):
             return
         app = get_excel_app()
-        if not app: 
+        if not app:
             return
         try:
+            # 1=msoAutoShape（AddConnector で作るコネクタも実機確認では Type=1 として
+            # 報告される。9=msoLine は一部のOffice実装向けの防御的追加）, 4=msoComment, 6=msoGroup, 9=msoLine
             for s in list(app.ActiveSheet.Shapes):
-                if s.Type in [1, 4, 6]: 
+                if s.Type in [1, 4, 6, 9]:
                     s.Delete()
             self.engine.last_group_name = None
         except (pywintypes.com_error, AttributeError) as e:
             logger.warning(f"clear_canvas_failed | error={e}")
+            messagebox.showerror("エラー", f"図面クリアに失敗しました: {e}")
 
     def _apply_preset(self, p: Dict) -> None:
         """プリセット設定を適用する。

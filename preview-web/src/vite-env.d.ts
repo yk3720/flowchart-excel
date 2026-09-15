@@ -30,7 +30,7 @@ export type PreviewHostApi = {
 declare global {
   interface Window {
     __PREVIEW_PAYLOAD__?: PreviewPayload;
-    setPreviewPayload?: (payload: PreviewPayload) => void;
+    setPreviewPayload?: (payload: PreviewPayload | null) => void;
     pywebview?: { api: PreviewHostApi };
   }
 }

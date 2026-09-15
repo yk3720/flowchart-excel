@@ -217,6 +217,27 @@ class EmbeddedStudioPreview:
             self._fp = table_fingerprint(fresh)
         return self._payload
 
+    def clear_session(self) -> None:
+        """プレビューを破棄し、待機状態のWebViewへ戻す（キャンセル用）。"""
+        self.stop_live()
+        self._payload = None
+        self._fp = ""
+        self._inject_retries = 0
+        if self._core_ready:
+            js = "window.setPreviewPayload && window.setPreviewPayload(null);"
+            try:
+                core = getattr(self._frame, "core", None)
+                if core is None:
+                    core = getattr(self._frame.web, "CoreWebView2", None)
+                if core is not None:
+                    core.ExecuteScriptAsync(js)
+                else:
+                    self._frame.evaluate_js(js)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("embedded_clear_failed | %s", exc)
+        if self._on_payload_change:
+            self._on_payload_change()
+
     def is_create_enabled(self) -> bool:
         if not self._payload:
             return False

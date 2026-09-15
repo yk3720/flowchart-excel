@@ -39,6 +39,12 @@ def connect_nodes(
                 target_shape = shape_map.get(dest_id)
                 target_node = node_dict.get(dest_id)
                 if not target_shape or not target_node:
+                    logger.warning(
+                        "connector_target_missing | from=%s | to=%s | direction=%s",
+                        node["id"],
+                        dest_id,
+                        direction,
+                    )
                     continue
 
                 is_loop = target_node["ridx"] < node["ridx"] or _node_tier(

@@ -10,18 +10,9 @@ import pywintypes
 
 from app.constants import ExcelConstants, FONT_FAMILY
 from app.core.flow_colors import fill_vba_rgb_for_hint
-from app.core.layout_preview import compute_layout
+from app.core.layout_preview import SHAPE_CODE_BY_KIND, compute_layout
 
 logger = logging.getLogger("flowchart-excel")
-
-_SHAPE_CODE = {
-    "rect": ExcelConstants.MSOSHAPE_RECTANGLE,
-    "diamond": ExcelConstants.MSOSHAPE_DIAMOND,
-    "roundrect": ExcelConstants.MSOSHAPE_ROUNDED_RECTANGLE,
-    "parallelogram": ExcelConstants.MSOSHAPE_PARALLELOGRAM,
-    "manual": ExcelConstants.MSOSHAPE_MANUAL_INPUT,
-    "oval": ExcelConstants.MSOSHAPE_OVAL,
-}
 
 
 def place_shapes(
@@ -50,7 +41,7 @@ def place_shapes(
         if stop_event.is_set():
             break
 
-        stype_code = _SHAPE_CODE[item.shape_kind]
+        stype_code = SHAPE_CODE_BY_KIND[item.shape_kind]
         shp = sheet.Shapes.AddShape(
             stype_code,
             item.left,

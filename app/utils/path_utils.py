@@ -6,6 +6,7 @@ Powered by Auto (Cursor) (rev014)
 """
 import sys
 import os
+import ctypes
 from pathlib import Path
 import logging
 
@@ -98,8 +99,15 @@ def ensure_environment() -> None:
                 dir_path.mkdir(parents=True, exist_ok=True)
                 logger.info(f"self_healing | created missing directory: {dir_name}")
             except (OSError, PermissionError) as e:
-                # 権限不足等のエラー（Layer 1.5/2.1.2 規律）
-                print(f"環境エラー: ディレクトリ '{dir_name}' を作成できませんでした。権限を確認してください。({e})")
+                # 権限不足等のエラー（Layer 1.5/2.1.2 規律）。
+                # ロガー初期化(setup_logger)前・windowedビルドでコンソールが無くても
+                # 必ず利用者に伝わるよう、print に加えてネイティブダイアログも出す。
+                msg = f"環境エラー: ディレクトリ '{dir_name}' を作成できませんでした。権限を確認してください。({e})"
+                print(msg)
+                try:
+                    ctypes.windll.user32.MessageBoxW(0, msg, "flowchart-excel — 起動エラー", 0x10)
+                except OSError:
+                    pass
                 sys.exit(1)
 
 

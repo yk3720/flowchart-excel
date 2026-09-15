@@ -15,7 +15,11 @@ from app.core.group_manager import (
 )
 from app.core.layout_preview import PreviewModel, build_preview_model, estimate_row_heights
 from app.core.parse_table import parse_table_rows
-from app.core.preview_payload import build_studio_preview_payload, table_list_to_com_tuple
+from app.core.preview_payload import (
+    build_studio_preview_payload,
+    schema_to_force_v2,
+    table_list_to_com_tuple,
+)
 from app.core.shape_placer import place_shapes
 
 logger = logging.getLogger("flowchart-excel")
@@ -117,16 +121,27 @@ class ExcelFlowchartEngine:
         start_cell = sheet.Range(anchor_address)
         return sheet, start_cell
 
-    def build_preview(
-        self,
-        is_full_mode: bool,
-        config: Dict[str, Any],
-    ) -> PreviewModel:
-        """Excel を読まず描画せず、プレビュー用モデルを返す。"""
-        data, _sheet, _start_cell, title_txt = self._read_selection(is_full_mode)
-        nodes, row_map, col_count = parse_table_rows(data)
+    def build_preview_from_payload(self, payload: Dict[str, Any]) -> PreviewModel:
+        """プレビュー用ペイロード（Excel再読込なし）からプレビュー用モデルを返す。
+
+        Canvasフォールバック専用。`build_studio_payload` で一度読んだ `payload` を
+        そのまま使うことで、埋め込み/2窓WebViewと同じ「表示＝作成」契約を満たす。
+        """
+        table = payload.get("table") or []
+        data = table_list_to_com_tuple(table)
+        layout = payload.get("layout") or {}
+        force_v2 = schema_to_force_v2(payload.get("schema"))
+        nodes, row_map, col_count = parse_table_rows(data, force_v2=force_v2)
+        title_txt = str(payload.get("title") or "フローチャート")
+        is_full_mode = bool(payload.get("isFullMode"))
+        config = {
+            "width": float(layout["width"]),
+            "height": float(layout["heightMin"]),
+            "gap_v": float(layout["gapV"]),
+            "gap_h": float(layout["gapH"]),
+        }
         logger.info(
-            "preview_parse | nodes=%s | col_count=%s | full=%s",
+            "preview_from_payload_parse | nodes=%s | col_count=%s | full=%s",
             len(nodes),
             col_count,
             is_full_mode,
@@ -138,23 +153,6 @@ class ExcelFlowchartEngine:
             title=title_txt,
             is_full_mode=is_full_mode,
             row_heights=estimate_row_heights(row_map, float(config["height"])),
-        )
-
-    def draw(
-        self,
-        is_full_mode: bool,
-        config: Dict[str, Any],
-        theme: Dict[str, Any],
-    ) -> str:
-        data, sheet, start_cell, title_txt = self._read_selection(is_full_mode)
-        return self._draw_core(
-            data=data,
-            sheet=sheet,
-            start_cell=start_cell,
-            title_txt=title_txt,
-            is_full_mode=is_full_mode,
-            config=config,
-            theme=theme,
         )
 
     def draw_from_studio_payload(
@@ -182,6 +180,7 @@ class ExcelFlowchartEngine:
         }
         title_txt = str(payload.get("title") or "フローチャート")
         is_full_mode = bool(payload.get("isFullMode"))
+        force_v2 = schema_to_force_v2(payload.get("schema"))
 
         logger.info(
             "draw_from_snapshot | title=%s | full=%s | rows=%s",
@@ -197,6 +196,7 @@ class ExcelFlowchartEngine:
             is_full_mode=is_full_mode,
             config=config,
             theme=theme,
+            force_v2=force_v2,
         )
 
     def _draw_core(
@@ -209,6 +209,7 @@ class ExcelFlowchartEngine:
         is_full_mode: bool,
         config: Dict[str, Any],
         theme: Dict[str, Any],
+        force_v2: Optional[bool] = None,
     ) -> str:
         app = get_excel_app()
         if not app:
@@ -217,6 +218,14 @@ class ExcelFlowchartEngine:
 
         app.ScreenUpdating = False
         app.DisplayAlerts = False
+        created_names: List[str] = []
+
+        def _rollback() -> None:
+            for name in created_names:
+                try:
+                    sheet.Shapes(name).Delete()
+                except (pywintypes.com_error, AttributeError):
+                    pass
 
         try:
             base_left = float(start_cell.Left)
@@ -226,7 +235,7 @@ class ExcelFlowchartEngine:
             gv = float(config["gap_v"])
             gh = float(config["gap_h"])
 
-            nodes, row_map, col_count = parse_table_rows(data)
+            nodes, row_map, col_count = parse_table_rows(data, force_v2=force_v2)
             if not nodes:
                 return ""
 
@@ -252,24 +261,31 @@ class ExcelFlowchartEngine:
                 self.stop_event,
                 h_min,
             )
+            created_names.extend(standalone_names)
+            created_names.extend(info["shp"].Name for info in diamond_info)
 
             if self.stop_event.is_set():
                 logger.info("draw_cancelled_before_connect")
+                _rollback()
                 return ""
 
             connector_names = connect_nodes(
                 sheet, nodes, shape_map, theme, self.stop_event
             )
+            created_names.extend(connector_names)
 
             if self.stop_event.is_set():
                 logger.info("draw_cancelled_before_finalize")
+                _rollback()
                 return ""
 
             composite_pairs = finalize_composites(sheet, diamond_info, w_fix)
+            created_names.extend(tx.Name for _, tx in composite_pairs)
 
             extra_names: List[str] = []
             if is_full_mode:
                 extra_names = add_frame_and_title(sheet, bounds, title_txt)
+                created_names.extend(extra_names)
 
             all_names = standalone_names + connector_names + extra_names
             group_name = create_final_groups(sheet, all_names, composite_pairs)
@@ -277,6 +293,10 @@ class ExcelFlowchartEngine:
             logger.info("draw_completed | group_name=%s", group_name)
             return group_name
 
+        except Exception:
+            logger.exception("draw_failed_rolling_back")
+            _rollback()
+            raise
         finally:
             app.ScreenUpdating = True
             app.DisplayAlerts = True

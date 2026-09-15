@@ -43,6 +43,19 @@ def resolve_schema(table: List[List[Any]]) -> Optional[str]:
     return None
 
 
+def schema_to_force_v2(schema: Optional[str]) -> Optional[bool]:
+    """payload の schema 文字列から `parse_table_rows` 用の `force_v2` を導出する。
+
+    プレビュー構築時に一度だけ判定した schema を描画・再プレビュー時にも使い回し、
+    同じ表に対して判定がぶれる余地をなくす（None の場合は呼び出し側で再検出する）。
+    """
+    if schema == "table-10col-v2":
+        return True
+    if schema in ("table-10col-v1", "table-9col-v1"):
+        return False
+    return None
+
+
 def build_studio_preview_payload(
     data: Tuple[Any, ...],
     *,

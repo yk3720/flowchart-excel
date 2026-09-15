@@ -3,6 +3,8 @@
 **日付:** 2026-07-21  
 **状態:** Accepted
 
+> **採番系列の注記**: 本ファイルは `docs/` 配下の独立した採番系列。`仕様・管理/意思決定記録(ADR).md` の `[ADR-001]`（GUIライブラリ選定・customtkinter）とは別の決定であり無関係。
+
 ## 背景
 
 - flowchart-studio（Web）は `table-10col-v2` を正本とする

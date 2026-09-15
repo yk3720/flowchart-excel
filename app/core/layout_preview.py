@@ -8,7 +8,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from app.constants import ExcelConstants
+
 ShapeKind = Literal["rect", "diamond", "roundrect", "parallelogram", "manual", "oval"]
+
+# 図形種別(ShapeKind) → Excel AutoShape の MSOコード。SSOT: 本辞書のみ
+# (旧 shape_placer._SHAPE_CODE / main_window._smart_input の自前 if/elif を統合)。
+SHAPE_CODE_BY_KIND: Dict[ShapeKind, int] = {
+    "rect": ExcelConstants.MSOSHAPE_RECTANGLE,
+    "diamond": ExcelConstants.MSOSHAPE_DIAMOND,
+    "roundrect": ExcelConstants.MSOSHAPE_ROUNDED_RECTANGLE,
+    "parallelogram": ExcelConstants.MSOSHAPE_PARALLELOGRAM,
+    "manual": ExcelConstants.MSOSHAPE_MANUAL_INPUT,
+    "oval": ExcelConstants.MSOSHAPE_OVAL,
+}
 
 
 @dataclass
@@ -58,7 +71,8 @@ def _node_tier(node: Dict[str, Any]) -> int:
     return int(node["ridx"])
 
 
-def _shape_kind(stype: str) -> Tuple[ShapeKind, bool]:
+def shape_kind_for_type(stype: str) -> Tuple[ShapeKind, bool]:
+    """表の図形種別文字列 → (ShapeKind, is_diamond)。図形種別マッピングのSSOT。"""
     if "判断" in stype:
         return "diamond", True
     if any(x in stype for x in ("〇", "○", "省略記号")):
@@ -126,7 +140,7 @@ def compute_layout(
 
         for node in sorted(bucket["nodes"], key=lambda n: (n["level"], n["id"])):
             cell_left = base_left + node["level"] * (w_fix + gh)
-            kind, is_diamond = _shape_kind(str(node["type"]))
+            kind, is_diamond = shape_kind_for_type(str(node["type"]))
             row_h = float(bucket["height"])
             if kind == "oval":
                 shp_w = min(w_fix, row_h)

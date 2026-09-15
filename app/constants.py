@@ -80,6 +80,10 @@ FLOW_DANGER_HOVER = "#b91c1c"
 FLOW_SUCCESS_BG = "#f0fdf4"
 FLOW_SUCCESS_BORDER = "#bbf7d0"
 FLOW_SUCCESS_TEXT = "#14532d"
+# SSOT: flowchart-studio --flow-warning-border-strong / --flow-warning-ring / --flow-warning-text
+FLOW_WARNING_SOLID = "#fcd34d"
+FLOW_WARNING_SOLID_HOVER = "#fbbf24"
+FLOW_WARNING_TEXT = "#78350f"
 
 # 枠線太さ・角丸は画面内で単一値に統一する（VISUAL_DESIGN_RULES §2 SSOT）
 CARD_BORDER_WIDTH = 1

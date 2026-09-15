@@ -78,30 +78,41 @@ def add_frame_and_title(sheet: Any, bounds: Tuple, title: str) -> List[str]:
 
 def create_final_groups(sheet: Any, all_names: List[str], composite_pairs: List[Tuple]) -> str:
     """全ての要素を階層的にグループ化する。
-    
+
     Args:
         sheet (Any): Excelワークシートオブジェクト。
         all_names (List[str]): グループ化対象の図形名リスト。
         composite_pairs (List[Tuple]): (背景図形, テキスト図形) のペアリスト。
-        
+
     Returns:
-        str: 最終グループ図形の名前。失敗時は空文字列。
+        str: 最終グループ図形の名前。
+
+    Raises:
+        RuntimeError: 最終グループ化に失敗した場合（呼び出し元がロールバックできるよう、
+            途中で作った複合グループは個々の図形に戻してから送出する）。
     """
     final_names = list(all_names)
+    composite_group_names: List[str] = []
     for bg, tx in composite_pairs:
         try:
             grp = sheet.Shapes.Range(tuple([bg.Name, tx.Name])).Group()
             final_names.append(grp.Name)
+            composite_group_names.append(grp.Name)
         except (pywintypes.com_error, AttributeError) as e:
             logger.warning(f"composite_grouping_failed | error={e}")
             final_names.extend([bg.Name, tx.Name])
-    
-    if not final_names: 
+
+    if not final_names:
         return ""
-    
+
     try:
         final_grp = sheet.Shapes.Range(tuple(final_names)).Group()
         return final_grp.Name
     except (pywintypes.com_error, AttributeError) as e:
         logger.error(f"grouping_failed | error={e}")
-        return ""
+        for name in composite_group_names:
+            try:
+                sheet.Shapes(name).Ungroup()
+            except (pywintypes.com_error, AttributeError):
+                pass
+        raise RuntimeError("最終グループ化に失敗しました。") from e
