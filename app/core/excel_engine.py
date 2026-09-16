@@ -12,6 +12,7 @@ from app.core.group_manager import (
     add_frame_and_title,
     create_final_groups,
     finalize_composites,
+    frame_anchor_offset,
 )
 from app.core.layout_preview import PreviewModel, build_preview_model, estimate_row_heights
 from app.core.parse_table import parse_table_rows
@@ -113,6 +114,13 @@ class ExcelFlowchartEngine:
             raise RuntimeError(
                 "作成先のセルを取得できませんでした。Excelでセルを選択してから再試行してください。"
             ) from exc
+        try:
+            logger.info(
+                "draw_anchor_resolved | sheet=%s | address=%s | left=%s | top=%s",
+                sheet.Name, start_cell.Address, start_cell.Left, start_cell.Top,
+            )
+        except (pywintypes.com_error, AttributeError):
+            pass
         return sheet, start_cell
 
     def build_preview_from_payload(self, payload: Dict[str, Any]) -> PreviewModel:
@@ -220,6 +228,12 @@ class ExcelFlowchartEngine:
         try:
             base_left = float(start_cell.Left)
             base_top = float(start_cell.Top)
+            if is_full_mode:
+                # 外枠+タイトルを付ける場合、選択セル＝外枠の角になるよう
+                # 図形群の原点をその分だけ右下へずらす（add_frame_and_title 参照）
+                dx, dy = frame_anchor_offset()
+                base_left += dx
+                base_top += dy
             h_min = float(config["height"])
             w_fix = float(config["width"])
             gv = float(config["gap_v"])

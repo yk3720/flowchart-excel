@@ -6,11 +6,26 @@ Rule 2.1.5: 認知負荷の管理に基づき、excel_engine.pyからグルー�
 import logging
 from typing import Any, Dict, List, Tuple
 import pywintypes
-from app.constants import ExcelConstants, FONT_FAMILY
+from app.constants import ExcelConstants, FLOW_SURFACE_SUBTLE, FONT_FAMILY
 from app.core.flow_colors import DEFAULT_FILL_HEX, hex_to_vba_rgb
 from app.core.shape_placer import set_text_style
 
 logger = logging.getLogger("flowchart-excel")
+
+# 外枠の余白（add_frame_and_title が図形群の外側に確保する幅）
+FRAME_MARGIN = 30.0
+# タイトルボックスが最初の図形の上に確保する高さ（add_frame_and_title 参照）
+TITLE_GAP_ABOVE_SHAPE = 75.0
+
+
+def frame_anchor_offset() -> Tuple[float, float]:
+    """外枠の左上角を選択セルに一致させるための (dx, dy) オフセット。
+
+    add_frame_and_title はタイトル分だけ最初の図形より上・外枠分だけ左に
+    はみ出して描画する。選択セル＝外枠の角にしたい呼び出し側は、この分だけ
+    図形群の原点を右下へずらしてから add_frame_and_title に渡す。
+    """
+    return FRAME_MARGIN, FRAME_MARGIN + TITLE_GAP_ABOVE_SHAPE
 
 
 def finalize_composites(sheet: Any, d_info: List[Dict], w_fix: float) -> List[Tuple]:
@@ -50,9 +65,11 @@ def add_frame_and_title(sheet: Any, bounds: Tuple, title: str) -> List[str]:
     w, h = r - l, b - t
     
     # タイトル
-    tl, tt = l + (w / 2.0) - 225.0, max(10.0, t - 75.0)
+    tl, tt = l + (w / 2.0) - 225.0, max(10.0, t - TITLE_GAP_ABOVE_SHAPE)
     t_shp = sheet.Shapes.AddTextbox(1, tl, tt, 450.0, 45.0)
-    t_shp.Fill.Visible = False
+    # タイトルだけ淡色サーフェス色の地を敷き、白いフロー全体との対比を作る
+    t_shp.Fill.Visible = True
+    t_shp.Fill.ForeColor.RGB = hex_to_vba_rgb(FLOW_SURFACE_SUBTLE)
     t_shp.Line.Visible = False
     tf = t_shp.TextFrame2
     tf.TextRange.Text = title
@@ -65,7 +82,7 @@ def add_frame_and_title(sheet: Any, bounds: Tuple, title: str) -> List[str]:
     names.append(t_shp.Name)
     
     # 外枠
-    margin = 30.0
+    margin = FRAME_MARGIN
     f_top = min(t, tt)
     f_h = max(b, tt + 45.0) - f_top
     frame = sheet.Shapes.AddShape(1, l - margin, f_top - margin, w + 2 * margin, f_h + 2 * margin)

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.core.excel_engine import ExcelFlowchartEngine
+from app.core.group_manager import frame_anchor_offset
 
 DATA = (
     ("10", "処理", "", "20", "", 0, 0, "A", "", ""),
@@ -94,6 +95,31 @@ class DrawCoreRollbackTests(unittest.TestCase):
 
         sheet.Shapes("s1").Delete.assert_called_once()
         sheet.Shapes("c1").Delete.assert_called_once()
+
+    def test_full_mode_offsets_anchor_so_frame_corner_matches_selected_cell(self) -> None:
+        """表全体モードでは、外枠の角が選択セルに一致するよう図形群の原点をずらす。"""
+        engine, sheet, _start_cell, _stop_event = self._engine_and_context()
+        start_cell = MagicMock(Left=100.0, Top=200.0)
+
+        with patch("app.core.excel_engine.get_excel_app", return_value=MagicMock()), \
+             patch(
+                 "app.core.excel_engine.place_shapes",
+                 return_value=({}, ["s1"], [], (0, 0, 10, 10)),
+             ) as mock_place_shapes, \
+             patch("app.core.excel_engine.connect_nodes", return_value=[]), \
+             patch("app.core.excel_engine.finalize_composites", return_value=[]), \
+             patch("app.core.excel_engine.add_frame_and_title", return_value=[]), \
+             patch("app.core.excel_engine.create_final_groups", return_value="grp"):
+            engine._draw_core(
+                data=DATA, sheet=sheet, start_cell=start_cell, title_txt="t",
+                is_full_mode=True, config=CONFIG, theme=THEME,
+            )
+
+        called_left = mock_place_shapes.call_args.args[3]
+        called_top = mock_place_shapes.call_args.args[4]
+        dx, dy = frame_anchor_offset()
+        self.assertEqual(called_left, 100.0 + dx)
+        self.assertEqual(called_top, 200.0 + dy)
 
 
 class ReadCurrentAnchorTests(unittest.TestCase):

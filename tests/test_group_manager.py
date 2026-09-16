@@ -4,9 +4,15 @@ from unittest.mock import MagicMock
 
 import pywintypes
 
-from app.constants import ExcelConstants
+from app.constants import ExcelConstants, FLOW_SURFACE_SUBTLE
 from app.core.flow_colors import DEFAULT_FILL_HEX, hex_to_vba_rgb
-from app.core.group_manager import add_frame_and_title, create_final_groups
+from app.core.group_manager import (
+    FRAME_MARGIN,
+    TITLE_GAP_ABOVE_SHAPE,
+    add_frame_and_title,
+    create_final_groups,
+    frame_anchor_offset,
+)
 
 
 class AddFrameAndTitleTests(unittest.TestCase):
@@ -23,6 +29,27 @@ class AddFrameAndTitleTests(unittest.TestCase):
         self.assertTrue(frame.Fill.Visible)
         self.assertEqual(frame.Fill.ForeColor.RGB, hex_to_vba_rgb(DEFAULT_FILL_HEX))
         frame.ZOrder.assert_called_once_with(ExcelConstants.MSO_SEND_TO_BACK)
+
+    def test_title_textbox_has_subtle_gray_fill_for_contrast(self) -> None:
+        """白いフロー全体の中でタイトルだけ視認できるよう、淡色サーフェス色の地を敷く。"""
+        sheet = MagicMock()
+        frame = MagicMock()
+        title = MagicMock()
+        sheet.Shapes.AddTextbox.return_value = title
+        sheet.Shapes.AddShape.return_value = frame
+
+        add_frame_and_title(sheet, (0.0, 0.0, 100.0, 100.0), "タイトル")
+
+        self.assertTrue(title.Fill.Visible)
+        self.assertEqual(title.Fill.ForeColor.RGB, hex_to_vba_rgb(FLOW_SURFACE_SUBTLE))
+
+
+class FrameAnchorOffsetTests(unittest.TestCase):
+    def test_offset_cancels_out_frame_margin_and_title_gap(self) -> None:
+        """呼び出し側がこの分だけ図形群をずらせば、外枠の外側の角が選択セルに一致する。"""
+        dx, dy = frame_anchor_offset()
+        self.assertEqual(dx, FRAME_MARGIN)
+        self.assertEqual(dy, FRAME_MARGIN + TITLE_GAP_ABOVE_SHAPE)
 
 
 class CreateFinalGroupsTests(unittest.TestCase):

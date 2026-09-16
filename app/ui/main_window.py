@@ -44,6 +44,14 @@ STYLE_DESTRUCTIVE = dict(fg_color=FLOW_DANGER, hover_color=FLOW_DANGER_HOVER, te
 STYLE_WARNING = dict(
     fg_color=FLOW_WARNING_SOLID, hover_color=FLOW_WARNING_SOLID_HOVER, text_color=FLOW_WARNING_TEXT,
 )
+STYLE_WHITE = dict(
+    fg_color=FLOW_SURFACE, hover_color=FLOW_SURFACE_MUTED, text_color=FLOW_TEXT_BODY,
+    border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER,
+)
+STYLE_PREVIEWING = dict(
+    fg_color=FLOW_SUCCESS_BG, hover_color=FLOW_SUCCESS_BG, text_color=FLOW_SUCCESS_TEXT,
+    border_width=CARD_BORDER_WIDTH, border_color=FLOW_SUCCESS_BORDER,
+)
 STYLE_CARD = dict(fg_color=FLOW_SURFACE, border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER)
 
 
@@ -358,6 +366,9 @@ class FlowchartApp(ctk.CTk):
             )
             self._hint_label.grid(row=2, column=0, padx=4, pady=(0, 8), sticky="w")
 
+        # 生成直後は STYLE_PRIMARY 固定のため、実際の有効/無効に応じた色へ合わせ直す
+        self._update_create_button_state()
+
     def _cancel_generation(self) -> None:
         """進行中の生成処理を中止する。"""
         self.stop_event.set()
@@ -435,7 +446,10 @@ class FlowchartApp(ctk.CTk):
             and self._embedded_preview is not None
             and self._embedded_preview.is_create_enabled()
         )
-        self.btn_create.configure(state="normal" if enabled else "disabled")
+        self.btn_create.configure(
+            state="normal" if enabled else "disabled",
+            **(STYLE_PRIMARY if enabled else STYLE_SECONDARY),
+        )
 
     def _confirm_create(self) -> None:
         """埋め込みプレビュー表示中の内容で Excel 作成。"""
@@ -576,6 +590,7 @@ class FlowchartApp(ctk.CTk):
             app = get_excel_app()
             if not app:
                 self.status_text.set(f"Excel未起動\nライブ {live_label}")
+                self._update_preview_button_color(has_target=False)
                 return
 
             sel = app.Selection
@@ -595,8 +610,22 @@ class FlowchartApp(ctk.CTk):
                 f"{workbook_name} / {sheet_name}\n"
                 f"対象: {title} · {addr} ({r.Rows.Count}行) · ライブ {live_label}"
             )
+            self._update_preview_button_color(has_target=(title != "未検出"))
         except (AttributeError, pywintypes.com_error):
             self.status_text.set(f"Excel操作中...\nライブ {live_label}")
+            self._update_preview_button_color(has_target=False)
+
+    def _update_preview_button_color(self, *, has_target: bool) -> None:
+        """「表を読み込んでプレビュー」の色を状態で切り替える。
+
+        白=対象未検出 · 青=対象検出（未読込）· 緑=プレビュー中（読込済み）。
+        """
+        if self.preview_active:
+            self.btn_preview.configure(**STYLE_PREVIEWING)
+        elif has_target:
+            self.btn_preview.configure(**STYLE_PRIMARY)
+        else:
+            self.btn_preview.configure(**STYLE_WHITE)
 
     def _create_template(self, mode: str) -> None:
         """10列 v2（flowchart-studio 互換）の雛形テーブルを生成。

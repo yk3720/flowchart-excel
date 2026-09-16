@@ -1,10 +1,11 @@
 """1窓プレビュー — tkwebview2 埋め込み（ルート A）。"""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tkinter as tk
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from app.core.live_preview import (
     LIVE_POLL_INTERVAL_SEC,
@@ -154,6 +155,9 @@ class EmbeddedStudioPreview:
         self._inject_retries = 0
         self._pending_main_work = False
         self._pump_alive = True
+        # React側 generated.ok の反映（ExecuteScriptAsync ポーリング）。未取得のうちは作成不可扱い（安全側デフォルト）
+        self._validation_ok: Optional[bool] = None
+        self._pending_validation_result: Optional[Tuple[bool, Any]] = None
 
         self._host = tk.Frame(master, highlightthickness=0)
         self._host.pack(fill="both", expand=True)
@@ -193,6 +197,8 @@ class EmbeddedStudioPreview:
         self._payload = payload
         self._fp = table_fingerprint(payload)
         self._inject_retries = 0
+        # 新規セッションごとにReact側からの再報告を待つ（安全側デフォルトへリセット）
+        self._validation_ok = None
         self._inject(payload)
         self.start_live()
         if self._on_payload_change:
@@ -223,6 +229,7 @@ class EmbeddedStudioPreview:
         self._payload = None
         self._fp = ""
         self._inject_retries = 0
+        self._validation_ok = None
         if self._core_ready:
             js = "window.setPreviewPayload && window.setPreviewPayload(null);"
             try:
@@ -241,7 +248,45 @@ class EmbeddedStudioPreview:
     def is_create_enabled(self) -> bool:
         if not self._payload:
             return False
-        return bool((self._payload.get("meta") or {}).get("nodeCount", 0))
+        has_nodes = bool((self._payload.get("meta") or {}).get("nodeCount", 0))
+        return has_nodes and bool(self._validation_ok)
+
+    def _poll_validation(self) -> None:
+        """React側の window.__flowchartValidation を ExecuteScriptAsync で読み取る。
+
+        この埋め込みWebViewは pywebview の正規初期化（webview.start()）を経由せず
+        window.gui が None のままのため、window.expose() が内部で使う window.run_js()
+        は例外を出す（inject_pywebview 全般が機能しない）。また pywebview の
+        evaluate_js（EdgeChrome内部でControl.Invoke+semaphoreで同期待機する実装）は
+        このアプリにWinFormsのメッセージポンプが無いため呼び出したスレッドを
+        永久にブロックする（実機検証で確認済み・Tkメインスレッドがフリーズする）。
+        そのため _inject と同じ core.ExecuteScriptAsync を直接叩き、結果は
+        ContinueWith の非同期コールバックで受け取る。
+        """
+        core = getattr(self._frame, "core", None)
+        if core is None:
+            core = getattr(self._frame.web, "CoreWebView2", None)
+        if core is None:
+            return
+        try:
+            from System import Action, String
+            from System.Threading.Tasks import Task
+
+            task = core.ExecuteScriptAsync("window.__flowchartValidation || null")
+            task.ContinueWith(Action[Task[String]](self._on_validation_js_result))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("embedded_validation_poll_failed | %s", exc)
+
+    def _on_validation_js_result(self, task: Any) -> None:
+        """CLR/スレッドプールから呼ばれる。Tkには触れずフラグだけ立てる。"""
+        try:
+            raw = task.Result
+            data = json.loads(raw) if raw else None
+        except Exception:  # noqa: BLE001
+            return
+        if not isinstance(data, dict):
+            return
+        self._pending_validation_result = (bool(data.get("ok")), data.get("errorCount"))
 
     def _sync_webview_size(self) -> None:
         try:
@@ -280,6 +325,18 @@ class EmbeddedStudioPreview:
             self._sync_webview_size()
             if self._payload and self._core_ready:
                 self._inject(self._payload)
+        if self._pending_validation_result is not None:
+            ok, error_count = self._pending_validation_result
+            self._pending_validation_result = None
+            if ok != self._validation_ok:
+                self._validation_ok = ok
+                logger.info(
+                    "embedded_validation_reported | ok=%s | error_count=%s",
+                    ok,
+                    error_count,
+                )
+                if self._on_payload_change:
+                    self._on_payload_change()
         self._schedule_after(100, self._main_pump)
 
     def _inject(self, payload: Dict[str, Any]) -> None:
@@ -318,6 +375,8 @@ class EmbeddedStudioPreview:
     def _live_tick(self) -> None:
         if not self._live or not self._payload:
             return
+        if self._core_ready:
+            self._poll_validation()
         fresh = try_refresh_studio_payload(self._payload)
         if fresh:
             meta = dict(fresh.get("meta") or {})

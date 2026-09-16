@@ -27,11 +27,18 @@ export type PreviewHostApi = {
   cancel: () => Promise<void> | void;
 };
 
+export type FlowchartValidationState = {
+  ok: boolean;
+  errorCount: number;
+};
+
 declare global {
   interface Window {
     __PREVIEW_PAYLOAD__?: PreviewPayload;
     setPreviewPayload?: (payload: PreviewPayload | null) => void;
     pywebview?: { api: PreviewHostApi };
+    /** 埋め込み1窓モードのみ: Python側がevaluate_jsでポーリングして読む。 */
+    __flowchartValidation?: FlowchartValidationState | null;
   }
 }
 

@@ -56,13 +56,34 @@ export function App() {
     return toReactFlow(generated.placed, generated.edges);
   }, [generated]);
 
+  // 埋め込み1窓モード（CTkネイティブの「Excelに作成」）向け:
+  // nodeCountだけでなくバリデーション結果もCTk側の有効/無効判定へ反映する。
+  // 埋め込みWebViewはpywebviewの正規初期化(webview.start())を経由しないため
+  // window.pywebview.apiのJS→Pythonブリッジが機能しない。そのためpush通知ではなく
+  // window上に結果を置き、Python側がevaluate_jsで定期ポーリングする方式にしている。
+  useEffect(() => {
+    if (!generated) {
+      window.__flowchartValidation = null;
+      return;
+    }
+    window.__flowchartValidation = {
+      ok: generated.ok,
+      errorCount: generated.ok ? 0 : generated.errors.length,
+    };
+  }, [generated]);
+
   const onConfirm = useCallback(() => callHost("confirm"), []);
   const onCancel = useCallback(() => callHost("cancel"), []);
 
   if (!payload) {
     return (
-      <div className="flex h-full items-center justify-center text-flow-text-muted">
-        プレビューデータを待機中…
+      <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center">
+        <div className="text-sm font-medium text-flow-text-body">
+          プレビューはまだありません
+        </div>
+        <div className="max-w-[240px] text-xs leading-relaxed text-flow-text-muted">
+          Excelで表を選んだ状態で、上のボタンを押すとここに表示されます
+        </div>
       </div>
     );
   }
