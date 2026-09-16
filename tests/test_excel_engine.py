@@ -96,5 +96,62 @@ class DrawCoreRollbackTests(unittest.TestCase):
         sheet.Shapes("c1").Delete.assert_called_once()
 
 
+class ReadCurrentAnchorTests(unittest.TestCase):
+    def test_uses_active_selection_not_stored_watch(self) -> None:
+        """描画位置は実行時点の選択セルを使う（プレビュー起動時に覚えたwatchは使わない）。"""
+        engine = ExcelFlowchartEngine(threading.Event())
+        app = MagicMock()
+        current_cell = MagicMock()
+        app.Selection.Cells.return_value = current_cell
+        app.ActiveSheet = "current_sheet"
+
+        with patch("app.core.excel_engine.get_excel_app", return_value=app):
+            sheet, start_cell = engine._read_current_anchor()
+
+        self.assertEqual(sheet, "current_sheet")
+        self.assertIs(start_cell, current_cell)
+        app.Selection.Cells.assert_called_once_with(1, 1)
+
+    def test_raises_when_excel_not_running(self) -> None:
+        engine = ExcelFlowchartEngine(threading.Event())
+        with patch("app.core.excel_engine.get_excel_app", return_value=None):
+            with self.assertRaises(RuntimeError):
+                engine._read_current_anchor()
+
+
+class DrawFromStudioPayloadAnchorTests(unittest.TestCase):
+    def test_ignores_stale_watch_anchor_and_uses_current_selection(self) -> None:
+        """payload の meta.watch.anchorAddress が古くても、実行時点の選択セルで描画すること。"""
+        engine = ExcelFlowchartEngine(threading.Event())
+        current_sheet = MagicMock()
+        current_cell = MagicMock()
+
+        payload = {
+            "table": [["10", "処理", "", "", "", 0, 0, "A", "", ""]],
+            "layout": {"width": 160.0, "heightMin": 60.0, "gapV": 30.0, "gapH": 100.0},
+            "title": "t",
+            "isFullMode": False,
+            "meta": {
+                "watch": {
+                    "workbookName": "stale.xlsx",
+                    "sheetName": "Sheet1",
+                    "anchorAddress": "$B$5",
+                }
+            },
+        }
+
+        with patch(
+            "app.core.excel_engine.ExcelFlowchartEngine._read_current_anchor",
+            return_value=(current_sheet, current_cell),
+        ) as mock_anchor, patch.object(
+            engine, "_draw_core", return_value="grp"
+        ) as mock_draw_core:
+            engine.draw_from_studio_payload(payload, theme=THEME)
+
+        mock_anchor.assert_called_once()
+        self.assertIs(mock_draw_core.call_args.kwargs["sheet"], current_sheet)
+        self.assertIs(mock_draw_core.call_args.kwargs["start_cell"], current_cell)
+
+
 if __name__ == "__main__":
     unittest.main()

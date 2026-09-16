@@ -4,7 +4,25 @@ from unittest.mock import MagicMock
 
 import pywintypes
 
-from app.core.group_manager import create_final_groups
+from app.constants import ExcelConstants
+from app.core.flow_colors import DEFAULT_FILL_HEX, hex_to_vba_rgb
+from app.core.group_manager import add_frame_and_title, create_final_groups
+
+
+class AddFrameAndTitleTests(unittest.TestCase):
+    def test_frame_is_filled_white_and_sent_to_back(self) -> None:
+        sheet = MagicMock()
+        frame = MagicMock()
+        title = MagicMock()
+        # AddShape はタイトルの後に外枠を作る（この順に呼ばれる想定）
+        sheet.Shapes.AddTextbox.return_value = title
+        sheet.Shapes.AddShape.return_value = frame
+
+        add_frame_and_title(sheet, (0.0, 0.0, 100.0, 100.0), "タイトル")
+
+        self.assertTrue(frame.Fill.Visible)
+        self.assertEqual(frame.Fill.ForeColor.RGB, hex_to_vba_rgb(DEFAULT_FILL_HEX))
+        frame.ZOrder.assert_called_once_with(ExcelConstants.MSO_SEND_TO_BACK)
 
 
 class CreateFinalGroupsTests(unittest.TestCase):

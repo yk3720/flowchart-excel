@@ -47,6 +47,8 @@ class ExcelConstants:
     XL_CENTER = -4108
     XL_RIGHT = -4152
 
+    MSO_SEND_TO_BACK = 1
+
     CONNECTOR_SITE_TOP = 1
     CONNECTOR_SITE_LEFT = 2
     CONNECTOR_SITE_BOTTOM = 3

@@ -132,7 +132,7 @@ class FlowchartApp(ctk.CTk):
         f_head.grid_columnconfigure(3, weight=1)
 
         ctk.CTkButton(f_head, text="閉", width=45, height=30, corner_radius=CORNER_RADIUS,
-                      command=self.destroy, **STYLE_SECONDARY).grid(row=0, column=4, padx=(2, 5))
+                      command=self.destroy, **STYLE_WARNING).grid(row=0, column=4, padx=(2, 5))
 
         ctk.CTkFrame(self, height=1, corner_radius=0, fg_color=FLOW_BORDER).grid(
             row=1, column=0, sticky="ew", padx=0, pady=0

@@ -97,28 +97,22 @@ class ExcelFlowchartEngine:
         payload["meta"] = meta
         return payload
 
-    def _resolve_watch(self, watch: Dict[str, Any]) -> Tuple[Any, Any]:
-        """watch メタから配置先シートと起点セルを解決する。"""
+    def _read_current_anchor(self) -> Tuple[Any, Any]:
+        """「Excelに作成」実行時点で選択されているセルを描画起点として取得する。
+
+        表の読み込み元とは独立に、作成ボタンを押した瞬間の選択セルを起点にする
+        （表の位置を覚えておく方式は行挿入等でズレるため採らない）。
+        """
         app = get_excel_app()
         if not app:
             raise RuntimeError("Excelが起動していません。")
-
-        workbook_name = watch.get("workbookName")
-        sheet_name = watch.get("sheetName")
-        anchor_address = watch.get("anchorAddress")
-        if not workbook_name or not sheet_name or not anchor_address:
-            raise ValueError("watch メタが不完全です。")
-
-        workbook = None
-        for wb in app.Workbooks:
-            if str(wb.Name) == str(workbook_name):
-                workbook = wb
-                break
-        if workbook is None:
-            raise RuntimeError(f"ブックが見つかりません: {workbook_name}")
-
-        sheet = workbook.Sheets(sheet_name)
-        start_cell = sheet.Range(anchor_address)
+        try:
+            sheet = app.ActiveSheet
+            start_cell = app.Selection.Cells(1, 1)
+        except (pywintypes.com_error, AttributeError) as exc:
+            raise RuntimeError(
+                "作成先のセルを取得できませんでした。Excelでセルを選択してから再試行してください。"
+            ) from exc
         return sheet, start_cell
 
     def build_preview_from_payload(self, payload: Dict[str, Any]) -> PreviewModel:
@@ -160,16 +154,12 @@ class ExcelFlowchartEngine:
         payload: Dict[str, Any],
         theme: Dict[str, Any],
     ) -> str:
-        """プレビュー確定スナップショットから描画（表示内容＝作成内容）。"""
-        watch = (payload.get("meta") or {}).get("watch")
-        if not watch:
-            raise ValueError("watch メタがありません。プレビューを開き直してください。")
-
+        """プレビュー確定スナップショットから描画（内容＝表示スナップショット、位置＝実行時点の選択セル）。"""
         table = payload.get("table") or []
         if not table:
             raise ValueError("スナップショットに表データがありません。")
 
-        sheet, start_cell = self._resolve_watch(watch)
+        sheet, start_cell = self._read_current_anchor()
         data = table_list_to_com_tuple(table)
         layout = payload.get("layout") or {}
         config = {

@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Tuple
 import pywintypes
 from app.constants import ExcelConstants, FONT_FAMILY
+from app.core.flow_colors import DEFAULT_FILL_HEX, hex_to_vba_rgb
 from app.core.shape_placer import set_text_style
 
 logger = logging.getLogger("flowchart-excel")
@@ -68,9 +69,12 @@ def add_frame_and_title(sheet: Any, bounds: Tuple, title: str) -> List[str]:
     f_top = min(t, tt)
     f_h = max(b, tt + 45.0) - f_top
     frame = sheet.Shapes.AddShape(1, l - margin, f_top - margin, w + 2 * margin, f_h + 2 * margin)
-    frame.Fill.Visible = False
+    frame.Fill.Visible = True
+    frame.Fill.ForeColor.RGB = hex_to_vba_rgb(DEFAULT_FILL_HEX)
     frame.Line.ForeColor.RGB = 0
     frame.Line.Weight = 1.5
+    # 白塗りにすると後から追加した分だけ最前面に来て既存ノードを覆い隠すため、最背面へ送る
+    frame.ZOrder(ExcelConstants.MSO_SEND_TO_BACK)
     names.append(frame.Name)
     
     return names
