@@ -8,7 +8,14 @@ import {
   type FlowNodeData,
 } from "@/lib/flowchart/graph/toReactFlow";
 import type { LayoutConfig } from "@/lib/flowchart/model/types";
+import { ProposalPanel } from "./ProposalPanel";
 import type { PreviewPayload } from "./vite-env";
+
+type TabId = "canvas" | "proposal";
+const EMBEDDED_TABS: { id: TabId; label: string }[] = [
+  { id: "canvas", label: "プレビュー" },
+  { id: "proposal", label: "提案" },
+];
 
 function readInitialPayload(): PreviewPayload | null {
   return window.__PREVIEW_PAYLOAD__ ?? null;
@@ -28,6 +35,7 @@ export function App() {
   const [payload, setPayload] = useState<PreviewPayload | null>(readInitialPayload);
   const canvasRef = useRef<FlowCanvasHandle | null>(null);
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [activeTab, setActiveTab] = useState<TabId>("canvas");
 
   useEffect(() => {
     window.setPreviewPayload = (next) => setPayload(next);
@@ -116,8 +124,29 @@ export function App() {
         ) : null}
       </header>
 
+      {embedded ? (
+        <div className="flex shrink-0 gap-1 border-b border-flow-border bg-flow-surface px-4 pt-2">
+          {EMBEDDED_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={
+                activeTab === tab.id
+                  ? "rounded-t-md border border-b-0 border-flow-border bg-flow-surface-muted px-3 py-1.5 text-xs font-medium text-flow-text"
+                  : "rounded-t-md px-3 py-1.5 text-xs font-medium text-flow-text-muted hover:text-flow-text"
+              }
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="relative min-h-0 flex-1">
-        {generated?.ok ? (
+        {activeTab === "proposal" && embedded ? (
+          <ProposalPanel />
+        ) : generated?.ok ? (
           <>
             <FlowCanvas
               canvasRef={canvasRef}

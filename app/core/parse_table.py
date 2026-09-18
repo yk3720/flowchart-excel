@@ -49,6 +49,22 @@ def parse_level(value: Any) -> int:
         return 0
 
 
+def parse_level_optional(value: Any) -> Optional[int]:
+    """parse_level 同様だが空欄・不正値を None で返す（C-2 の空欄判定専用）。
+
+    parse_level は空欄を 0 に丸めるため、既存の描画・レイアウト経路
+    （layout_preview.py・connector_manager.py）が依存するこの丸めは変更しない。
+    C-2 の固定点反復は「空欄かどうか」を区別する必要があるため、生セル値を
+    この関数経由で読む（parse_table_rows() が返す node["level"] は使わない）。
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def split_dests(value: Any) -> List[str]:
     if value is None or value == "":
         return []

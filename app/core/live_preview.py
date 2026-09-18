@@ -43,8 +43,8 @@ def table_fingerprint(payload: Dict[str, Any]) -> str:
     )
 
 
-def _read_watched_range(watch: Dict[str, Any]) -> Tuple[Any, str]:
-    """watch メタから Excel 範囲を再取得する。"""
+def read_watched_range(watch: Dict[str, Any]) -> Tuple[Any, str]:
+    """watch メタから Excel 範囲を再取得する（level_writer.py 等からも共有利用）。"""
     app = get_excel_app()
     if not app:
         raise RuntimeError("Excelが起動していません。")
@@ -96,7 +96,7 @@ def try_refresh_studio_payload(base: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
     pythoncom.CoInitialize()
     try:
-        data, title_txt = _read_watched_range(watch)
+        data, title_txt = read_watched_range(watch)
         layout = base.get("layout") or {}
         config = layout_to_config(layout)
         fresh = build_studio_preview_payload(

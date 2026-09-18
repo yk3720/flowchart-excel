@@ -4,15 +4,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import tkinter as tk
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import pythoncom
+
+from app.core.level_inference import ProposalResult, compute_level_proposals
+from app.core.level_writer import write_level_updates
 from app.core.live_preview import (
     LIVE_POLL_INTERVAL_SEC,
+    read_watched_range,
     table_fingerprint,
     try_refresh_studio_payload,
 )
-from app.core.preview_inject import build_payload_inject_js
+from app.core.parse_table import parse_level_optional, parse_table_rows
+from app.core.preview_inject import build_payload_inject_js, build_set_global_js
+from app.core.proposal_fingerprint import LEVEL_COL, ProposalSnapshot, capture_snapshot
 from app.ui.studio_preview import resolve_preview_dist
 
 logger = logging.getLogger("flowchart-excel")
@@ -20,6 +28,9 @@ logger = logging.getLogger("flowchart-excel")
 # 注入リトライ（setPreviewPayload 準備待ち · evaluate 失敗時）
 _INJECT_RETRY_MS = 200
 _INJECT_RETRY_MAX = 25
+
+# C-2: 区別①（トポロジー変更）検知による自動再計算の上限回数
+_PROPOSAL_STALE_RETRY_MAX = 3
 
 
 def _ensure_pywebview_compat() -> None:
@@ -159,6 +170,14 @@ class EmbeddedStudioPreview:
         self._validation_ok: Optional[bool] = None
         self._pending_validation_result: Optional[Tuple[bool, Any]] = None
 
+        # C-2: 「提案」タブの JS↔Python ポーリングブリッジ（window.__proposalAction 経由）
+        self._proposal_stop_event = threading.Event()
+        self._pending_proposal_action: Optional[Dict[str, Any]] = None
+        self._proposal_last_request_id: Optional[str] = None
+        self._proposal_baseline: Optional[ProposalSnapshot] = None
+        self._proposal_result: Optional[ProposalResult] = None
+        self._proposal_stale_retries = 0
+
         self._host = tk.Frame(master, highlightthickness=0)
         self._host.pack(fill="both", expand=True)
         # 初期 HWND は親より小さく（airspace 防止）。
@@ -230,6 +249,9 @@ class EmbeddedStudioPreview:
         self._fp = ""
         self._inject_retries = 0
         self._validation_ok = None
+        self._proposal_stop_event.set()
+        self._proposal_baseline = None
+        self._proposal_result = None
         if self._core_ready:
             js = "window.setPreviewPayload && window.setPreviewPayload(null);"
             try:
@@ -288,6 +310,238 @@ class EmbeddedStudioPreview:
             return
         self._pending_validation_result = (bool(data.get("ok")), data.get("errorCount"))
 
+    def _poll_proposal_action(self) -> None:
+        """C-2: React側の window.__proposalAction を ExecuteScriptAsync で読み取る。
+
+        _poll_validation と同じ理由（同期 evaluate_js は使えない）で
+        ExecuteScriptAsync + ContinueWith のポーリングを踏襲する。
+        """
+        core = getattr(self._frame, "core", None)
+        if core is None:
+            core = getattr(self._frame.web, "CoreWebView2", None)
+        if core is None:
+            return
+        try:
+            from System import Action, String
+            from System.Threading.Tasks import Task
+
+            task = core.ExecuteScriptAsync("window.__proposalAction || null")
+            task.ContinueWith(Action[Task[String]](self._on_proposal_action_js_result))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("embedded_proposal_poll_failed | %s", exc)
+
+    def _on_proposal_action_js_result(self, task: Any) -> None:
+        """CLR/スレッドプールから呼ばれる。Tkには触れずフラグだけ立てる。"""
+        try:
+            raw = task.Result
+            data = json.loads(raw) if raw else None
+        except Exception:  # noqa: BLE001
+            return
+        if not isinstance(data, dict):
+            return
+        self._pending_proposal_action = data
+
+    def _handle_proposal_action(self, req: Dict[str, Any]) -> None:
+        """Tk メインスレッドから呼ばれる。実処理は background thread へ委譲する。"""
+        request_id = req.get("requestId")
+        scope = req.get("scope")
+        action = req.get("action")
+        mode = req.get("mode") or "blank_only"
+        if scope != "level":
+            return  # C-3（段）は未実装。scope フィールドだけ多重化に備えて先に定義しておく
+        if not request_id or request_id == self._proposal_last_request_id:
+            return  # ポーリングでの重複取得対策
+        self._proposal_last_request_id = request_id
+
+        watch = (self._payload.get("meta") or {}).get("watch") if self._payload else None
+        if not watch:
+            return
+
+        if action == "compute":
+            self._proposal_stop_event.clear()
+            self._proposal_stale_retries = 0
+            threading.Thread(
+                target=self._compute_proposal_worker,
+                args=(request_id, watch, mode),
+                daemon=True,
+            ).start()
+        elif action == "update":
+            threading.Thread(
+                target=self._update_proposal_worker,
+                args=(request_id, watch, mode),
+                daemon=True,
+            ).start()
+        elif action == "cancel":
+            self._proposal_stop_event.set()
+
+    def _run_proposal_compute(
+        self, watch: Dict[str, Any], mode: str
+    ) -> Tuple[ProposalResult, ProposalSnapshot]:
+        """Excel を再読取し「提案の計算」を実行する（呼び出し側スレッドで COM 初期化する）。"""
+        pythoncom.CoInitialize()
+        try:
+            data, _ = read_watched_range(watch)
+            nodes, _, _ = parse_table_rows(data)
+            raw_levels = {
+                n["id"]: parse_level_optional(
+                    data[n["ridx"]][LEVEL_COL] if len(data[n["ridx"]]) > LEVEL_COL else None
+                )
+                for n in nodes
+            }
+            result = compute_level_proposals(
+                nodes, raw_levels, mode=mode, stop_event=self._proposal_stop_event
+            )
+            snapshot = capture_snapshot(data)
+            return result, snapshot
+        finally:
+            pythoncom.CoUninitialize()
+
+    def _compute_proposal_worker(self, request_id: str, watch: Dict[str, Any], mode: str) -> None:
+        try:
+            result, snapshot = self._run_proposal_compute(watch, mode)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("proposal_compute_failed")
+            message = str(exc)
+            self._schedule_after(0, lambda: self._push_proposal_error(request_id, message))
+            return
+
+        self._proposal_baseline = snapshot
+        self._proposal_result = result
+        self._schedule_after(0, lambda: self._push_proposal_result(request_id, result))
+
+    def _update_proposal_worker(self, request_id: str, watch: Dict[str, Any], mode: str) -> None:
+        if self._proposal_result is None or self._proposal_baseline is None:
+            self._schedule_after(
+                0,
+                lambda: self._push_update_result(
+                    request_id, ok=False, error="先に「提案の計算」を実行してください。"
+                ),
+            )
+            return
+
+        try:
+            write_result = write_level_updates(
+                watch,
+                self._proposal_result.proposals,
+                mode=mode,
+                baseline=self._proposal_baseline,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("proposal_update_failed")
+            message = str(exc)
+            self._schedule_after(
+                0, lambda: self._push_update_result(request_id, ok=False, error=message)
+            )
+            return
+
+        if write_result.stale_topology:
+            self._proposal_stale_retries += 1
+            if self._proposal_stale_retries > _PROPOSAL_STALE_RETRY_MAX:
+                self._schedule_after(
+                    0,
+                    lambda: self._push_update_result(
+                        request_id,
+                        ok=False,
+                        error=(
+                            "表が編集され続けているため、編集を一時停止してから"
+                            "更新をやり直してください。"
+                        ),
+                    ),
+                )
+                return
+            # 区別①（トポロジー変更）検知 → 自動再計算し、一覧を再表示してから改めて確認を求める
+            try:
+                result, snapshot = self._run_proposal_compute(watch, mode)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("proposal_recompute_after_stale_failed")
+                message = str(exc)
+                self._schedule_after(
+                    0, lambda: self._push_update_result(request_id, ok=False, error=message)
+                )
+                return
+            self._proposal_baseline = snapshot
+            self._proposal_result = result
+            self._schedule_after(0, lambda: self._push_proposal_result(request_id, result))
+            self._schedule_after(
+                0,
+                lambda: self._push_update_result(request_id, ok=False, stale_topology=True),
+            )
+            return
+
+        self._proposal_stale_retries = 0
+        self._schedule_after(
+            0,
+            lambda: self._push_update_result(
+                request_id,
+                ok=write_result.ok,
+                updated_count=write_result.updated_count,
+                excluded_count=write_result.excluded_count,
+                error=write_result.error,
+            ),
+        )
+
+    def _push_proposal_result(self, request_id: str, result: ProposalResult) -> None:
+        if result.cancelled:
+            payload: Dict[str, Any] = {"requestId": request_id, "cancelled": True}
+        else:
+            payload = {
+                "requestId": request_id,
+                "proposals": [
+                    {
+                        "nodeId": p.node_id,
+                        "current": p.current,
+                        "proposed": p.proposed,
+                        "reason": p.reason,
+                    }
+                    for p in result.proposals
+                ],
+                "needsReview": [
+                    {"nodeId": r.node_id, "reason": r.reason} for r in result.needs_review
+                ],
+                "skippedMultiDest": list(result.skipped_multi_dest),
+            }
+        self._call_js("setProposalResult", payload)
+
+    def _push_proposal_error(self, request_id: str, message: str) -> None:
+        self._call_js("setProposalResult", {"requestId": request_id, "error": message})
+
+    def _push_update_result(
+        self,
+        request_id: str,
+        *,
+        ok: bool,
+        updated_count: int = 0,
+        excluded_count: int = 0,
+        stale_topology: bool = False,
+        error: Optional[str] = None,
+    ) -> None:
+        self._call_js(
+            "setProposalUpdateResult",
+            {
+                "requestId": request_id,
+                "ok": ok,
+                "updatedCount": updated_count,
+                "excludedCount": excluded_count,
+                "staleTopology": stale_topology,
+                "error": error,
+            },
+        )
+
+    def _call_js(self, fn_name: str, payload: Any) -> None:
+        if not self._core_ready:
+            return
+        js = build_set_global_js(fn_name, payload)
+        try:
+            core = getattr(self._frame, "core", None)
+            if core is None:
+                core = getattr(self._frame.web, "CoreWebView2", None)
+            if core is not None:
+                core.ExecuteScriptAsync(js)
+            else:
+                self._frame.evaluate_js(js)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("embedded_proposal_push_failed | fn=%s | %s", fn_name, exc)
+
     def _sync_webview_size(self) -> None:
         try:
             from tkwebview2.tkwebview2 import user32
@@ -337,6 +591,10 @@ class EmbeddedStudioPreview:
                 )
                 if self._on_payload_change:
                     self._on_payload_change()
+        if self._pending_proposal_action is not None:
+            action_req = self._pending_proposal_action
+            self._pending_proposal_action = None
+            self._handle_proposal_action(action_req)
         self._schedule_after(100, self._main_pump)
 
     def _inject(self, payload: Dict[str, Any]) -> None:
@@ -377,6 +635,7 @@ class EmbeddedStudioPreview:
             return
         if self._core_ready:
             self._poll_validation()
+            self._poll_proposal_action()
         fresh = try_refresh_studio_payload(self._payload)
         if fresh:
             meta = dict(fresh.get("meta") or {})
