@@ -51,6 +51,36 @@ class DrawCoreRollbackTests(unittest.TestCase):
         sheet.Shapes("s1").Delete.assert_called_once()
         sheet.Shapes("s2").Delete.assert_called_once()
 
+    def test_rollback_on_cancel_before_groups(self) -> None:
+        """F6: finalize_composites 後・create_final_groups 前でキャンセルされた場合も
+        図形を残さずロールバックする（改善点レビュー_2026-09-18_第4回 F6）。"""
+        engine, sheet, start_cell, stop_event = self._engine_and_context()
+
+        def _finalize_composites(sheet_, diamond_info, w_fix):
+            stop_event.set()  # finalize_composites の直後でユーザーが中止した想定
+            return []
+
+        with patch("app.core.excel_engine.get_excel_app", return_value=MagicMock()), \
+             patch(
+                 "app.core.excel_engine.place_shapes",
+                 return_value=({}, ["s1"], [], (0, 0, 10, 10)),
+             ), \
+             patch("app.core.excel_engine.connect_nodes", return_value=["c1"]), \
+             patch(
+                 "app.core.excel_engine.finalize_composites",
+                 side_effect=_finalize_composites,
+             ), \
+             patch("app.core.excel_engine.create_final_groups") as mock_create_groups:
+            result = engine._draw_core(
+                data=DATA, sheet=sheet, start_cell=start_cell, title_txt="t",
+                is_full_mode=False, config=CONFIG, theme=THEME,
+            )
+
+        self.assertEqual(result, "")
+        mock_create_groups.assert_not_called()
+        sheet.Shapes("s1").Delete.assert_called_once()
+        sheet.Shapes("c1").Delete.assert_called_once()
+
     def test_rollback_on_exception_during_finalize(self) -> None:
         engine, sheet, start_cell, _stop_event = self._engine_and_context()
 

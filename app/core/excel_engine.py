@@ -286,6 +286,11 @@ class ExcelFlowchartEngine:
             composite_pairs = finalize_composites(sheet, diamond_info, w_fix)
             created_names.extend(tx.Name for _, tx in composite_pairs)
 
+            if self.stop_event.is_set():
+                logger.info("draw_cancelled_before_groups")
+                _rollback()
+                return ""
+
             extra_names: List[str] = []
             if is_full_mode:
                 extra_names = add_frame_and_title(sheet, bounds, title_txt)

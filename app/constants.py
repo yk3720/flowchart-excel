@@ -28,6 +28,9 @@ TABLE_HEADERS_10_V2: List[str] = [
 # 雛形の図形種別ドロップダウン。SSOT: flowchart-studio SHAPE_TYPE_OPTIONS
 SHAPE_TYPE_VALIDATION = "端子,処理,判断,入出力,手動入力,〇"
 
+# 雛形の色列ドロップダウン。SSOT: app/core/flow_colors.py FILL_HEX_BY_KEYWORD（rev015・F2）
+COLOR_VALIDATION = "黄,橙,青"
+
 
 class ExcelConstants:
     """Excel COM 定数。"""

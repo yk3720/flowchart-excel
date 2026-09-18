@@ -27,6 +27,7 @@ from app.constants import (
     DEFAULT_GAP_H,
     ExcelConstants,
     SHAPE_TYPE_VALIDATION,
+    COLOR_VALIDATION,
     TEMPLATE_DATA,
     REVISION,
     TABLE_HEADERS_10_V2,
@@ -680,7 +681,11 @@ class FlowchartApp(ctk.CTk):
             v_range = sheet.Range(sheet.Cells(r+1, c+1), sheet.Cells(r+100, c+1))
             v_range.Validation.Delete()
             v_range.Validation.Add(3, 1, 1, SHAPE_TYPE_VALIDATION)
-            
+
+            color_range = sheet.Range(sheet.Cells(r+1, c+2), sheet.Cells(r+100, c+2))
+            color_range.Validation.Delete()
+            color_range.Validation.Add(3, 1, 1, COLOR_VALIDATION)
+
             messagebox.showinfo("完了", "雛形を作成しました。")
         except (pywintypes.com_error, AttributeError) as e:
             logger.error(f"template_creation_failed | error={e}")
@@ -807,7 +812,10 @@ class FlowchartApp(ctk.CTk):
             "3. 初回は preview-web で npm run build が必要です。\n\n"
             "4. 雛形・スマート・パレット・選択範囲は\n"
             "   「その他 ▾」メニューにあります。\n\n"
-            "5. 寸法・テーマは「設定 ▾」から変更できます。"
+            "5. 寸法・テーマは「設定 ▾」から変更できます。\n\n"
+            "6. 判断ノードの段・列 早見表:\n"
+            "   接続先(下)=Yes → 同じ列のまま段を進める\n"
+            "   接続先(右)=No  → 列を変えて分岐する"
         )
         txt.insert("0.0", help_text)
         txt.configure(state="disabled")
