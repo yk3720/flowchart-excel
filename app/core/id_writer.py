@@ -1,4 +1,4 @@
-"""F5「更新」— 鮮度チェック後にID列を Excel へ一括書き込みする（構想設計§6-2）。
+"""F5「更新」— 鮮度チェック後にID列を Excel へ書き込む（構想設計§6-2）。
 
 `level_writer.write_level_updates`と同じ「統一読み取り→書き込み」のTOCTOU最小化
 パターン・`capture_snapshot`/`topology_changed`による既存行の鮮度チェックを再利用する。
@@ -10,6 +10,11 @@
 「その行が今もID空欄のままであること」、および監視対象テーブル全体の行数が提案計算
 時点から変化していないことを、書き込み直前に再確認する。いずれかが崩れていれば
 `stale_topology=True`を返し、既存のC-2と同じ自動再計算・再確認フローに合流させる。
+
+書き込み自体も`write_level_updates`の「列全体への一括 Value 代入」とは異なる。雛形は
+タイトル行が ListObject の直上に接するため CurrentRegion がタイトル＋表に広がり、
+ID列全体への一括代入が Excel に反映されない（例外なし）実機不具合があった。そのため
+提案行だけセル単位で書き、直後の読み戻しで反映を検証する。
 """
 from __future__ import annotations
 
@@ -97,14 +102,36 @@ def write_id_updates(
                 if norm_id(row[ID_COL] if row else None):
                     return WriteResult(ok=False, stale_topology=True)
 
-            id_range = r_tgt.Cells(1, ID_COL + 1).Resize(row_count, 1)
-            column: list[list[object]] = [
-                [row[ID_COL] if len(row) > ID_COL else None] for row in fresh_data
-            ]
+            # 雛形はタイトル行が表（ListObject）の直上に接するため CurrentRegion が
+            # タイトル＋ヘッダー＋データに広がる。ID列全体への一括 Value 代入は、
+            # この混在 Range では Excel 側に反映されない（例外も出ない）ことが
+            # 実機で確認された。提案行だけセル単位で書き、直後に読み戻して検証する。
             for p in proposals:
-                column[p.row_index][0] = p.proposed_id
+                r_tgt.Cells(p.row_index + 1, ID_COL + 1).Value = p.proposed_id
 
-            id_range.Value = column
+            verify = r_tgt.Value
+            if not verify or not isinstance(verify, tuple) or len(verify) != row_count:
+                return WriteResult(
+                    ok=False,
+                    error="ID採番の書き込み後に表を再読取できませんでした。もう一度お試しください。",
+                )
+            for p in proposals:
+                row = verify[p.row_index]
+                got = norm_id(row[ID_COL] if row else None)
+                if got != norm_id(p.proposed_id):
+                    logger.error(
+                        "id_update_verify_failed | row_index=%s | expected=%s | got=%s",
+                        p.row_index,
+                        p.proposed_id,
+                        got,
+                    )
+                    return WriteResult(
+                        ok=False,
+                        error=(
+                            "ID列への書き込みがExcelに反映されませんでした。"
+                            "表のセルを選択し直してから、もう一度「提案の計算」→「更新」を試してください。"
+                        ),
+                    )
         finally:
             app.ScreenUpdating = True
             app.DisplayAlerts = True

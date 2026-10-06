@@ -32,9 +32,8 @@ export type FlowchartValidationState = {
   errorCount: number;
 };
 
-// C-2: 「提案」タブ（段・列の自動計算・提案機能）の JS↔Python ポーリングブリッジ型。
-// scope は "level"（C-2・実装済み）/ "id"（F5・ID自動採番・実装済み）/
-// "tier"（C-3・未実装）を多重化できるよう最初から持つ。
+// 「表の補完」タブの JS↔Python ポーリングブリッジ型。
+// scope: "id"（F5）/ "level"（C-2 列）/ "tier"（C-3 段・空欄補完+振り直し）。
 export type ProposalScope = "level" | "id" | "tier";
 export type ProposalMode = "blank_only" | "full_recalc";
 export type ProposalActionKind = "compute" | "update" | "cancel";

@@ -74,19 +74,44 @@ class IdScopeIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(preview._id_proposal_result)
         self.assertEqual(preview._id_proposal_row_count, 2)
 
+        rows = [list(row) for row in fresh_rows]
+
+        class _FakeCell:
+            def __init__(self, r: int, c: int):
+                self._r = r
+                self._c = c
+
+            @property
+            def Value(self):
+                return rows[self._r][self._c]
+
+            @Value.setter
+            def Value(self, value):
+                rows[self._r][self._c] = value
+
+        class _FakeRange:
+            def __init__(self):
+                self.Rows = MagicMock()
+                self.Rows.Count = len(rows)
+
+            @property
+            def Value(self):
+                return tuple(tuple(row) for row in rows)
+
+            def Cells(self, row_1based: int, col_1based: int):
+                return _FakeCell(row_1based - 1, col_1based - 1)
+
         app = MagicMock()
         workbook = MagicMock()
         workbook.Name = _WATCH["workbookName"]
         app.Workbooks = [workbook]
         sheet = MagicMock()
         workbook.Sheets.return_value = sheet
-        r_tgt = MagicMock()
+        r_tgt = _FakeRange()
         sheet.Range.return_value.CurrentRegion = r_tgt  # isFullMode=True 用
-        r_tgt.Value = fresh_rows
-        r_tgt.Rows.Count = 2
 
         with patch(
-            "app.core.id_writer.read_watched_range", return_value=(fresh_rows, "t")
+            "app.core.id_writer.read_watched_range", return_value=(tuple(tuple(r) for r in rows), "t")
         ), patch("app.core.id_writer.get_excel_app", return_value=app), patch(
             "app.core.autosave_check.get_excel_app", return_value=None
         ):
@@ -98,8 +123,7 @@ class IdScopeIntegrationTests(unittest.TestCase):
         self.assertEqual(pushed_updates[0]["requestId"], "r2")
         self.assertTrue(pushed_updates[0]["ok"])
         self.assertEqual(pushed_updates[0]["updatedCount"], 1)
-        written = r_tgt.Cells.return_value.Resize.return_value.Value
-        self.assertEqual(written[1][0], "11")
+        self.assertEqual(rows[1][0], "11")
 
     def test_level_scope_action_is_unaffected_by_id_scope_wiring(self) -> None:
         """scopeディスパッチ追加が既存のlevelスコープ経路を壊していないことを確認。"""

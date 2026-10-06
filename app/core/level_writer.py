@@ -49,8 +49,11 @@ def write_level_updates(
     *,
     mode: ProposalMode,
     baseline: ProposalSnapshot,
+    target_col: int = LEVEL_COL,
 ) -> WriteResult:
     """提案されたセルへ、鮮度確認のうえ Excel を一括書き込みする。
+
+    `target_col` 既定は列(LEVEL_COL)。段(TIER_COL)の更新でも同じ関数を使う。
 
     区別①（ID追加削除・接続先(下)/(右)の変更）を検知した場合は書き込みを行わず
     `stale_topology=True` を返す（呼び出し側が再計算・再確認フローへ合流させ、
@@ -65,7 +68,7 @@ def write_level_updates(
     pythoncom.CoInitialize()
     try:
         data, _ = read_watched_range(watch)
-        fresh = capture_snapshot(data)
+        fresh = capture_snapshot(data, target_col=target_col)
 
         if topology_changed(baseline, fresh):
             return WriteResult(ok=False, stale_topology=True)
@@ -102,10 +105,10 @@ def write_level_updates(
                 addr = watch.get("rangeAddress") or watch["anchorAddress"]
                 r_tgt = sheet.Range(addr)
 
-            # 統一読み取り: ID列・level列を含む全列を1回のCOM呼び出し（r_tgt.Value）
+            # 統一読み取り: ID列・対象列を含む全列を1回のCOM呼び出し（r_tgt.Value）
             # で取得し、行数(row_count)・id_to_row をこの読み取りから再導出する
             # （①時点の`data`をそのまま使い回さない）。これにより、この後の実際の
-            # COM呼び出しは書き込み（level_range.Value = column）の1回のみになる
+            # COM呼び出しは書き込み（target_range.Value = column）の1回のみになる
             # （書き込み直前の2回目の読み取りを行わない。構想設計§1-1ステップ4）。
             fresh_data = r_tgt.Value
             if not fresh_data or not isinstance(fresh_data, tuple):
@@ -127,14 +130,14 @@ def write_level_updates(
                 # フローに合流
                 return WriteResult(ok=False, stale_topology=True)
 
-            level_range = r_tgt.Cells(1, LEVEL_COL + 1).Resize(row_count, 1)
+            target_range = r_tgt.Cells(1, target_col + 1).Resize(row_count, 1)
             column: list[list[Any]] = [
-                [row[LEVEL_COL] if len(row) > LEVEL_COL else None] for row in fresh_data
+                [row[target_col] if len(row) > target_col else None] for row in fresh_data
             ]
             for nid, new_value in to_write.items():
                 column[id_to_row[nid]][0] = new_value
 
-            level_range.Value = column
+            target_range.Value = column
         finally:
             app.ScreenUpdating = True
             app.DisplayAlerts = True

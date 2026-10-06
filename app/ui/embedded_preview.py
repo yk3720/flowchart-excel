@@ -27,8 +27,14 @@ from app.core.live_preview import (
 from app.core.parse_table import parse_level_optional, parse_table_rows
 from app.core.preview_inject import build_payload_inject_js, build_set_global_js
 from app.core.proposal_decision import decide_proposal_next_action
-from app.core.proposal_fingerprint import LEVEL_COL, ProposalSnapshot, capture_snapshot
+from app.core.proposal_fingerprint import (
+    LEVEL_COL,
+    TIER_COL,
+    ProposalSnapshot,
+    capture_snapshot,
+)
 from app.core.row_validation import apply_new_row_validation
+from app.core.tier_proposal import compute_tier_proposals
 from app.ui.studio_preview import resolve_preview_dist
 
 logger = logging.getLogger("flowchart-excel")
@@ -201,6 +207,7 @@ class EmbeddedStudioPreview:
         self._proposal_last_request_id: str | None = None
         self._proposal_baseline: ProposalSnapshot | None = None
         self._proposal_result: ProposalResult | None = None
+        self._proposal_target_col: int = LEVEL_COL
         self._proposal_stale_retries = 0
         # F8: compute/update の応答をまだ送っていない request_id（無応答タイムアウト時に
         # ベストエフォートでUI復旧指示を送る対象の特定に使う）。
@@ -209,9 +216,9 @@ class EmbeddedStudioPreview:
         # F4: 新規行へのデータ入力規則継承の基準行数（構想設計§5）。Noneは未計測。
         self._f4_row_count: int | None = None
 
-        # F5: 「ID採番」タブのJS↔Pythonポーリングブリッジ（scope="id"）。
+        # F5: ID採番（scope="id"）。列/段は `_proposal_*`、IDはこちら。
         # `_pending_proposal_action`/`_proposal_last_request_id`/`_proposal_stop_event`は
-        # scope（"level"/"id"）に関係なく共有する（window.__proposalAction自体は1つ）。
+        # scope に関係なく共有する（window.__proposalAction自体は1つ）。
         self._id_proposal_baseline: ProposalSnapshot | None = None
         self._id_proposal_result: IdProposalResult | None = None
         self._id_proposal_row_count: int | None = None
@@ -434,8 +441,8 @@ class EmbeddedStudioPreview:
         scope = req.get("scope")
         action = req.get("action")
         mode = req.get("mode") or "blank_only"
-        if scope not in ("level", "id"):
-            return  # C-3（段）は未実装。scope フィールドだけ多重化に備えて先に定義しておく
+        if scope not in ("level", "id", "tier"):
+            return
         if not request_id or request_id == self._proposal_last_request_id:
             return  # ポーリングでの重複取得対策
         self._proposal_last_request_id = request_id
@@ -463,50 +470,56 @@ class EmbeddedStudioPreview:
                 ).start()
             return
 
+        target_col = TIER_COL if scope == "tier" else LEVEL_COL
         if action == "compute":
             self._proposal_stop_event.clear()
             self._proposal_stale_retries = 0
             self._proposal_inflight_request_id = request_id
             threading.Thread(
                 target=self._compute_proposal_worker,
-                args=(request_id, watch, mode),
+                args=(request_id, watch, mode, target_col),
                 daemon=True,
             ).start()
         elif action == "update":
             self._proposal_inflight_request_id = request_id
             threading.Thread(
                 target=self._update_proposal_worker,
-                args=(request_id, watch, mode),
+                args=(request_id, watch, mode, target_col),
                 daemon=True,
             ).start()
         elif action == "cancel":
             self._proposal_stop_event.set()
 
     def _run_proposal_compute(
-        self, watch: dict[str, Any], mode: str
+        self, watch: dict[str, Any], mode: str, *, target_col: int = LEVEL_COL
     ) -> tuple[ProposalResult, ProposalSnapshot]:
         """Excel を再読取し「提案の計算」を実行する（呼び出し側スレッドで COM 初期化する）。"""
         pythoncom.CoInitialize()
         try:
             data, _ = read_watched_range(watch)
             nodes, _, _ = parse_table_rows(data)
-            raw_levels = {
+            raw_values = {
                 n["id"]: parse_level_optional(
-                    data[n["ridx"]][LEVEL_COL] if len(data[n["ridx"]]) > LEVEL_COL else None
+                    data[n["ridx"]][target_col] if len(data[n["ridx"]]) > target_col else None
                 )
                 for n in nodes
             }
-            result = compute_level_proposals(
-                nodes, raw_levels, mode=mode, stop_event=self._proposal_stop_event
-            )
-            snapshot = capture_snapshot(data)
+            if target_col == TIER_COL:
+                result = compute_tier_proposals(nodes, raw_values, mode=mode)
+            else:
+                result = compute_level_proposals(
+                    nodes, raw_values, mode=mode, stop_event=self._proposal_stop_event
+                )
+            snapshot = capture_snapshot(data, target_col=target_col)
             return result, snapshot
         finally:
             pythoncom.CoUninitialize()
 
-    def _compute_proposal_worker(self, request_id: str, watch: dict[str, Any], mode: str) -> None:
+    def _compute_proposal_worker(
+        self, request_id: str, watch: dict[str, Any], mode: str, target_col: int
+    ) -> None:
         try:
-            result, snapshot = self._run_proposal_compute(watch, mode)
+            result, snapshot = self._run_proposal_compute(watch, mode, target_col=target_col)
         except Exception as exc:
             logger.exception("proposal_compute_failed")
             message = str(exc)
@@ -515,9 +528,12 @@ class EmbeddedStudioPreview:
 
         self._proposal_baseline = snapshot
         self._proposal_result = result
+        self._proposal_target_col = target_col
         self._schedule_after(0, lambda: self._push_proposal_result(request_id, result))
 
-    def _update_proposal_worker(self, request_id: str, watch: dict[str, Any], mode: str) -> None:
+    def _update_proposal_worker(
+        self, request_id: str, watch: dict[str, Any], mode: str, target_col: int
+    ) -> None:
         if self._proposal_result is None or self._proposal_baseline is None:
             self._schedule_after(
                 0,
@@ -537,6 +553,7 @@ class EmbeddedStudioPreview:
                 self._proposal_result.proposals,
                 mode=mode,
                 baseline=self._proposal_baseline,
+                target_col=target_col,
             )
         except Exception as exc:
             logger.exception("proposal_update_failed")
@@ -567,7 +584,9 @@ class EmbeddedStudioPreview:
         if decision == "recompute":
             # 区別①（トポロジー変更）検知 → 自動再計算し、一覧を再表示してから改めて確認を求める
             try:
-                result, snapshot = self._run_proposal_compute(watch, mode)
+                result, snapshot = self._run_proposal_compute(
+                    watch, mode, target_col=target_col
+                )
             except Exception as exc:
                 logger.exception("proposal_recompute_after_stale_failed")
                 message = str(exc)
@@ -577,6 +596,7 @@ class EmbeddedStudioPreview:
                 return
             self._proposal_baseline = snapshot
             self._proposal_result = result
+            self._proposal_target_col = target_col
             self._schedule_after(0, lambda: self._push_proposal_result(request_id, result))
             self._schedule_after(
                 0,

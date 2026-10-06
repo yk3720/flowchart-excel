@@ -25,14 +25,41 @@ function sendProposalAction(
 
 type Status = "idle" | "computing" | "ready" | "updating" | "error";
 
-export type ProposalPanelProps = {
-  /** C-3（段の再採番）が同じパネルを流用するときに切り替える。 */
-  scope?: ProposalScope;
-  /** 表示ラベル（列 / 段）。C-3 で "段" を渡す想定。 */
-  targetLabel?: string;
+export type ProposalTarget = {
+  id: ProposalScope;
+  label: string;
 };
 
-export function ProposalPanel({ scope = "level", targetLabel = "列" }: ProposalPanelProps) {
+export type ProposalPanelProps = {
+  /** 単一スコープ利用時（後方互換）。`targets` 指定時は無視。 */
+  scope?: ProposalScope;
+  /** 表示ラベル（列 / 段 / ID）。`targets` 指定時は選択中ターゲットの label を使う。 */
+  targetLabel?: string;
+  /** 表の補完タブ用: ID / 列 / 段 を切り替え。 */
+  targets?: ProposalTarget[];
+};
+
+const TARGET_HINTS: Record<ProposalScope, string> = {
+  id: "IDが空の行へ、既存の最大IDの次から連番を提案します。",
+  level: "列が空の行へ、接続先(下)/(右)から推測した値を提案します。",
+  tier: "段が空の行へ、表の並び順で連番を提案します。「全部再計算」は既存の段をユニーク順位へ振り直します。",
+};
+
+export function ProposalPanel({
+  scope: scopeProp = "level",
+  targetLabel: targetLabelProp = "列",
+  targets,
+}: ProposalPanelProps) {
+  const unified = Boolean(targets && targets.length > 0);
+  const [selectedScope, setSelectedScope] = useState<ProposalScope>(
+    targets?.[0]?.id ?? scopeProp,
+  );
+  const scope = unified ? selectedScope : scopeProp;
+  const targetLabel =
+    unified
+      ? (targets?.find((t) => t.id === scope)?.label ?? targetLabelProp)
+      : targetLabelProp;
+
   const [mode, setMode] = useState<ProposalMode>("blank_only");
   const [status, setStatus] = useState<Status>("idle");
   const [proposals, setProposals] = useState<LevelProposal[]>([]);
@@ -41,6 +68,26 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
   const [message, setMessage] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const pendingRequestId = useRef<string | null>(null);
+
+  const resetLocal = useCallback(() => {
+    setStatus("idle");
+    setProposals([]);
+    setNeedsReview([]);
+    setSkippedMultiDest([]);
+    setMessage(null);
+    setErrorText(null);
+    setMode("blank_only");
+    pendingRequestId.current = null;
+  }, []);
+
+  const handleSelectTarget = useCallback(
+    (next: ProposalScope) => {
+      if (next === selectedScope) return;
+      setSelectedScope(next);
+      resetLocal();
+    },
+    [resetLocal, selectedScope],
+  );
 
   useEffect(() => {
     window.setProposalResult = (result: ProposalResultPayload) => {
@@ -110,16 +157,21 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
 
   const isBusy = status === "computing" || status === "updating";
   const isUpdating = status === "updating";
-  // 全部再計算モードはlevel（列・段）の提案専用。idスコープ（F5・ID自動採番）は
-  // 対象が常に新規行（ID空欄）のみのため、このモード自体が存在しない。
-  const supportsFullRecalc = scope === "level";
+  // 全部再計算は列・段のみ。IDは空欄行への採番だけなのでモード無し。
+  const supportsFullRecalc = scope === "level" || scope === "tier";
   const isFullRecalc = supportsFullRecalc && mode === "full_recalc";
+  const fullRecalcLabel =
+    scope === "tier"
+      ? "振り直し（既存の段をユニーク順位へ上書きします）"
+      : "全部再計算（既存値も上書き対象にします）";
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-flow-surface-muted">
       <div className="shrink-0 border-b border-flow-border bg-flow-surface px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm font-bold text-flow-text">{targetLabel}の提案・更新</div>
+          <div className="text-sm font-bold text-flow-text">
+            {unified ? "表の補完" : `${targetLabel}の提案・更新`}
+          </div>
           {supportsFullRecalc ? (
             <label className="flex items-center gap-1.5 text-xs text-flow-text-muted">
               <input
@@ -127,10 +179,32 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
                 checked={isFullRecalc}
                 onChange={(e) => setMode(e.target.checked ? "full_recalc" : "blank_only")}
               />
-              全部再計算（既存値も上書き対象にします）
+              {fullRecalcLabel}
             </label>
           ) : null}
         </div>
+
+        {unified && targets ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {targets.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={
+                  t.id === scope
+                    ? "rounded-md border border-flow-accent bg-flow-accent/10 px-2.5 py-1 text-xs font-medium text-flow-accent"
+                    : "rounded-md border border-flow-border px-2.5 py-1 text-xs font-medium text-flow-text-muted hover:text-flow-text"
+                }
+                disabled={isBusy}
+                onClick={() => handleSelectTarget(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <p className="mt-2 text-xs text-flow-text-muted">{TARGET_HINTS[scope]}</p>
         <p className="mt-1 text-xs text-flow-text-muted">
           「提案の計算」は Excel のセルを一切変更しません。内容を確認し「更新」を押した場合だけ書き込まれます。
         </p>
@@ -171,7 +245,9 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
 
         {isFullRecalc ? (
           <div className="mb-3 rounded-md border border-flow-proposal-border bg-flow-proposal-bg px-3 py-2 text-xs text-flow-proposal-text">
-            全部再計算モードでは、手入力した値も上書き対象になります。
+            {scope === "tier"
+              ? "振り直しモードでは、手入力した段の値も上書き対象になります。"
+              : "全部再計算モードでは、手入力した値も上書き対象になります。"}
           </div>
         ) : null}
 

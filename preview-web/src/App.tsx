@@ -11,11 +11,10 @@ import type { LayoutConfig } from "@/lib/flowchart/model/types";
 import { ProposalPanel } from "./ProposalPanel";
 import type { PreviewPayload } from "./vite-env";
 
-type TabId = "canvas" | "proposal" | "id-proposal";
+type TabId = "canvas" | "assist";
 const EMBEDDED_TABS: { id: TabId; label: string }[] = [
   { id: "canvas", label: "プレビュー" },
-  { id: "proposal", label: "提案" },
-  { id: "id-proposal", label: "ID採番" },
+  { id: "assist", label: "表の補完" },
 ];
 
 function readInitialPayload(): PreviewPayload | null {
@@ -145,10 +144,14 @@ export function App() {
       ) : null}
 
       <div className="relative min-h-0 flex-1">
-        {activeTab === "proposal" && embedded ? (
-          <ProposalPanel />
-        ) : activeTab === "id-proposal" && embedded ? (
-          <ProposalPanel scope="id" targetLabel="ID" />
+        {activeTab === "assist" && embedded ? (
+          <ProposalPanel
+            targets={[
+              { id: "id", label: "ID" },
+              { id: "level", label: "列" },
+              { id: "tier", label: "段" },
+            ]}
+          />
         ) : generated?.ok ? (
           <>
             <FlowCanvas
