@@ -19,6 +19,9 @@
   --color-flow-text-muted: var(--flow-text-muted);
   --color-flow-danger: var(--flow-danger);
   --color-flow-warning: var(--flow-warning);
+  --color-flow-proposal-bg: var(--flow-proposal-bg);
+  --color-flow-proposal-border: var(--flow-proposal-border);
+  --color-flow-proposal-text: var(--flow-proposal-text);
 }
 
 .react-flow svg {
@@ -42,6 +45,11 @@
   --flow-text-muted: #64748b;
   --flow-danger: #dc2626;
   --flow-warning: #d97706;
+  /* ProposalPanel専用（構想設計§2-1）: 本体UIが使う色相（青・灰・赤・緑）と重複しない
+     オレンジ系統1色に統一し、エラー/警告/完了メッセージの意味差は文言側で持たせる。 */
+  --flow-proposal-bg: #fff7ed;
+  --flow-proposal-border: #fdba74;
+  --flow-proposal-text: #9a3412;
   --flow-font-ui: 0.875rem;
   --flow-font-hint: 0.75rem;
   --flow-control-size: 2rem;

@@ -2,58 +2,94 @@
 
 Powered by Auto (Cursor) (rev014)
 """
+import logging
+import threading
 import tkinter as tk
 from tkinter import messagebox
+from typing import Any
+
 import customtkinter as ctk
-import threading
 import pythoncom
 import pywintypes
-import logging
-from typing import Dict, Optional, Any
+
+from app.constants import (
+    APP_FONT,
+    APP_NAME,
+    CARD_BORDER_WIDTH,
+    COLOR_VALIDATION,
+    CORNER_RADIUS,
+    DEFAULT_BOX_HEIGHT,
+    DEFAULT_BOX_WIDTH,
+    DEFAULT_GAP_H,
+    DEFAULT_GAP_V,
+    FLOW_ACCENT,
+    FLOW_ACCENT_HOVER,
+    FLOW_BORDER,
+    FLOW_BORDER_STRONG,
+    FLOW_DANGER,
+    FLOW_DANGER_HOVER,
+    FLOW_SUCCESS_BG,
+    FLOW_SUCCESS_BORDER,
+    FLOW_SUCCESS_TEXT,
+    FLOW_SURFACE,
+    FLOW_SURFACE_MUTED,
+    FLOW_SURFACE_SUBTLE,
+    FLOW_TEXT,
+    FLOW_TEXT_BODY,
+    FLOW_TEXT_MUTED,
+    FLOW_WARNING_SOLID,
+    FLOW_WARNING_SOLID_HOVER,
+    FLOW_WARNING_TEXT,
+    FONT_FAMILY,
+    LABEL_FONT,
+    PRESETS,
+    REVISION,
+    SHAPE_TYPE_VALIDATION,
+    SMALL_FONT,
+    TABLE_HEADERS_10_V2,
+    TEMPLATE_DATA,
+    THEMES,
+    TITLE_FONT,
+    ExcelConstants,
+)
+from app.core.autosave_check import autosave_reminder
 from app.core.excel_engine import ExcelFlowchartEngine, get_excel_app
 from app.core.smart_palette import create_smart_shape
-from app.ui.preview_dialog import FlowPreviewDialog
 from app.ui.embedded_preview import EmbeddedStudioPreview, embedded_preview_available
+from app.ui.preview_dialog import FlowPreviewDialog
 from app.ui.studio_preview import run_studio_preview
-from app.constants import (
-    FONT_FAMILY, TITLE_FONT, APP_FONT, SMALL_FONT, LABEL_FONT, APP_NAME,
-    FLOW_ACCENT, FLOW_ACCENT_HOVER, FLOW_SURFACE, FLOW_SURFACE_MUTED, FLOW_SURFACE_SUBTLE,
-    FLOW_BORDER, FLOW_BORDER_STRONG, FLOW_TEXT, FLOW_TEXT_BODY, FLOW_TEXT_MUTED,
-    FLOW_DANGER, FLOW_DANGER_HOVER, FLOW_SUCCESS_BG, FLOW_SUCCESS_BORDER, FLOW_SUCCESS_TEXT,
-    FLOW_WARNING_SOLID, FLOW_WARNING_SOLID_HOVER, FLOW_WARNING_TEXT,
-    CARD_BORDER_WIDTH,
-    CORNER_RADIUS, THEMES, PRESETS, DEFAULT_BOX_HEIGHT, DEFAULT_BOX_WIDTH,
-    DEFAULT_GAP_V,
-    DEFAULT_GAP_H,
-    ExcelConstants,
-    SHAPE_TYPE_VALIDATION,
-    COLOR_VALIDATION,
-    TEMPLATE_DATA,
-    REVISION,
-    TABLE_HEADERS_10_V2,
-)
 
 logger = logging.getLogger("flowchart-excel")
 
 # ボタンの見た目バリアント（shadcn 準拠 · SSOT はここのみ）
-STYLE_SECONDARY = dict(
-    fg_color=FLOW_SURFACE_SUBTLE, hover_color=FLOW_BORDER, text_color=FLOW_TEXT_BODY,
-    border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER,
-)
-STYLE_PRIMARY = dict(fg_color=FLOW_ACCENT, hover_color=FLOW_ACCENT_HOVER, text_color="white")
-STYLE_DESTRUCTIVE = dict(fg_color=FLOW_DANGER, hover_color=FLOW_DANGER_HOVER, text_color="white")
-STYLE_WARNING = dict(
-    fg_color=FLOW_WARNING_SOLID, hover_color=FLOW_WARNING_SOLID_HOVER, text_color=FLOW_WARNING_TEXT,
-)
-STYLE_WHITE = dict(
-    fg_color=FLOW_SURFACE, hover_color=FLOW_SURFACE_MUTED, text_color=FLOW_TEXT_BODY,
-    border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER,
-)
-STYLE_PREVIEWING = dict(
-    fg_color=FLOW_SUCCESS_BG, hover_color=FLOW_SUCCESS_BG, text_color=FLOW_SUCCESS_TEXT,
-    border_width=CARD_BORDER_WIDTH, border_color=FLOW_SUCCESS_BORDER,
-)
-STYLE_CARD = dict(fg_color=FLOW_SURFACE, border_width=CARD_BORDER_WIDTH, border_color=FLOW_BORDER)
+STYLE_SECONDARY = {
+    "fg_color": FLOW_SURFACE_SUBTLE, "hover_color": FLOW_BORDER, "text_color": FLOW_TEXT_BODY,
+    "border_width": CARD_BORDER_WIDTH, "border_color": FLOW_BORDER,
+}
+STYLE_PRIMARY = {"fg_color": FLOW_ACCENT, "hover_color": FLOW_ACCENT_HOVER, "text_color": "white"}
+STYLE_DESTRUCTIVE = {"fg_color": FLOW_DANGER, "hover_color": FLOW_DANGER_HOVER, "text_color": "white"}
+STYLE_WARNING = {
+    "fg_color": FLOW_WARNING_SOLID, "hover_color": FLOW_WARNING_SOLID_HOVER, "text_color": FLOW_WARNING_TEXT,
+}
+STYLE_WHITE = {
+    "fg_color": FLOW_SURFACE, "hover_color": FLOW_SURFACE_MUTED, "text_color": FLOW_TEXT_BODY,
+    "border_width": CARD_BORDER_WIDTH, "border_color": FLOW_BORDER,
+}
+STYLE_CARD = {"fg_color": FLOW_SURFACE, "border_width": CARD_BORDER_WIDTH, "border_color": FLOW_BORDER}
+# 埋め込みプレビューの操作列専用（構想設計§2-2）: 「キャンセル」平常時＝濃い灰＋枠あり
+# （押せる見た目）。STYLE_SECONDARY（他の常時有効な secondary ボタンと共有）とは
+# 意図的に分け、disabled化後の STYLE_DISABLED_FLAT との濃淡差を保つ。
+STYLE_NEUTRAL_ACTIVE = {
+    "fg_color": FLOW_BORDER_STRONG, "hover_color": FLOW_TEXT_MUTED, "text_color": FLOW_TEXT,
+    "border_width": CARD_BORDER_WIDTH, "border_color": FLOW_BORDER_STRONG,
+}
+# 埋め込みプレビューの操作列専用（構想設計§2-1/§2-2）: disabled＝薄いグレーアウト＋枠なし。
+# STYLE_WHITE（btn_preview の「対象未検出（押せる）」）と見分けやすくするため、
+# 枠を持たせず STYLE_SECONDARY よりさらに淡くする。
+STYLE_DISABLED_FLAT = {
+    "fg_color": FLOW_SURFACE_MUTED, "hover_color": FLOW_SURFACE_MUTED, "text_color": FLOW_TEXT_MUTED,
+    "border_width": 0,
+}
 
 
 class FlowchartApp(ctk.CTk):
@@ -69,6 +105,8 @@ class FlowchartApp(ctk.CTk):
         self.is_help_mode = False
         self.is_processing = False
         self.preview_active = False
+        self._live_tick = 0
+        self._preview_timeout_active = False
         self.stop_event = threading.Event()
         self.engine = ExcelFlowchartEngine(self.stop_event)
         
@@ -79,8 +117,8 @@ class FlowchartApp(ctk.CTk):
         self.var_gap_h = tk.DoubleVar(value=DEFAULT_GAP_H)
         self.var_theme = tk.StringVar(value="標準（信頼）")
         self.status_text = tk.StringVar(value="Excelを待機中...")
-        self.preset_buttons: Dict[str, ctk.CTkButton] = {}
-        self._embedded_preview: Optional[EmbeddedStudioPreview] = None
+        self.preset_buttons: dict[str, ctk.CTkButton] = {}
+        self._embedded_preview: EmbeddedStudioPreview | None = None
         self._use_embedded = embedded_preview_available()
         logger.info("preview_route_selected | embedded=%s", self._use_embedded)
 
@@ -300,6 +338,9 @@ class FlowchartApp(ctk.CTk):
                     self.preview_card,
                     schedule_after=self.after,
                     on_payload_change=self._update_create_button_state,
+                    on_js_timeout=self._on_preview_js_timeout,
+                    on_row_validation_applied=self._on_row_validation_applied,
+                    on_autosave_reminder=self._on_autosave_reminder,
                 )
             except Exception:
                 logger.exception("embedded_preview_init_failed")
@@ -383,6 +424,7 @@ class FlowchartApp(ctk.CTk):
         if self._embedded_preview is not None:
             self._embedded_preview.clear_session()
         self.preview_active = False
+        self._preview_timeout_active = False
         self._refresh_status_line()
         self._update_create_button_state()
 
@@ -424,7 +466,7 @@ class FlowchartApp(ctk.CTk):
                 self._embedded_preview.start_live()
         self.update()
 
-    def _current_config(self) -> Dict[str, float]:
+    def _current_config(self) -> dict[str, float]:
         return {
             "height": self.var_height.get(),
             "width": self.var_width.get(),
@@ -437,9 +479,13 @@ class FlowchartApp(ctk.CTk):
             return
         if self.btn_cancel_preview is not None:
             if self.preview_active:
-                self.btn_cancel_preview.configure(state="normal", **STYLE_WARNING)
+                self.btn_cancel_preview.configure(
+                    state="normal", text="キャンセル", **STYLE_NEUTRAL_ACTIVE
+                )
             else:
-                self.btn_cancel_preview.configure(state="disabled", **STYLE_SECONDARY)
+                self.btn_cancel_preview.configure(
+                    state="disabled", text="🔒 キャンセル", **STYLE_DISABLED_FLAT
+                )
         if self.btn_create is None:
             return
         enabled = (
@@ -449,7 +495,7 @@ class FlowchartApp(ctk.CTk):
         )
         self.btn_create.configure(
             state="normal" if enabled else "disabled",
-            **(STYLE_PRIMARY if enabled else STYLE_SECONDARY),
+            **(STYLE_PRIMARY if enabled else STYLE_DISABLED_FLAT),
         )
 
     def _confirm_create(self) -> None:
@@ -493,6 +539,7 @@ class FlowchartApp(ctk.CTk):
         if self._use_embedded and self._embedded_preview is not None:
             self._embedded_preview.load_session(payload)
             self.preview_active = True
+            self._preview_timeout_active = False
             self._refresh_status_line()
             self._update_create_button_state()
             return
@@ -539,15 +586,23 @@ class FlowchartApp(ctk.CTk):
             on_confirm=lambda: self._start_draw_worker(payload),
         )
 
-    def _start_draw_worker(self, snapshot_payload: Dict[str, Any]) -> None:
+    def _start_draw_worker(self, snapshot_payload: dict[str, Any]) -> None:
         """プレビュー確定スナップショットから Excel 描画を非同期開始する。"""
+        app = get_excel_app()
+        if app:
+            try:
+                reminder = autosave_reminder(app.ActiveWorkbook)
+            except (pywintypes.com_error, AttributeError):
+                reminder = None
+            if reminder:
+                messagebox.showinfo("保存の確認", reminder)
         threading.Thread(
             target=self._worker_from_snapshot,
             args=(snapshot_payload,),
             daemon=True,
         ).start()
 
-    def _worker_from_snapshot(self, snapshot_payload: Dict[str, Any]) -> None:
+    def _worker_from_snapshot(self, snapshot_payload: dict[str, Any]) -> None:
         """プレビュー確定スナップショットから描画（P2 · 表示＝作成）。"""
         pythoncom.CoInitialize()
         self.after(0, lambda: self._set_processing(True))
@@ -569,7 +624,7 @@ class FlowchartApp(ctk.CTk):
             logger.exception("worker_snapshot_failed")
             msg = (
                 f"【状況】生成処理が中断されました。\n"
-                f"【原因】{str(e)}\n"
+                f"【原因】{e!s}\n"
                 f"【具体的アクション】Excelがセル編集中ではないか確認し、編集を終了させてから再試行してください。"
             )
             self.after(0, lambda: messagebox.showerror("エラー", msg))
@@ -582,10 +637,54 @@ class FlowchartApp(ctk.CTk):
         self._refresh_status_line()
         self.after(1000, self._poll_excel_status)
 
+    def _on_preview_js_timeout(self) -> None:
+        """構想設計§4: 埋め込みプレビューの無応答検出時にステータス行で案内する。
+
+        React側のボタン復帰指示は embedded_preview 側が同一チャネル経由でベスト
+        エフォート送信するが、WebView2が真にハングしている場合は届かない可能性が
+        ある（既知の限界）。ここでの Tkinter 直接設定は WebView を経由しないため、
+        その場合でも必ず表示できる。
+        """
+        self._preview_timeout_active = True
+        self.status_text.set(
+            "プレビューが応答していません。\n"
+            "数秒待っても改善しない場合はプレビュー画面を閉じて開き直してください。"
+        )
+
+    def _on_row_validation_applied(self, added_count: int) -> None:
+        """構想設計§5: 新規行への入力規則適用完了をステータス行で一時通知する。
+
+        次回の`_poll_excel_status`（1秒間隔）で通常のExcel選択状態表示に戻る、
+        軽量な一時通知として扱う（F8のタイムアウト通知とは異なり持続させない）。
+        """
+        self.status_text.set(f"新規{added_count}行に入力規則（種別・色）を適用しました")
+
+    def _on_autosave_reminder(self, message: str) -> None:
+        """構想設計§7: 「更新」実行前のAutoSave無効リマインダーをステータス行で一時通知する。
+
+        「Excelに作成」側は`_start_draw_worker`でモーダル表示する（既存の完了/エラー
+        通知と同じ導線）。こちらはバックグラウンドワーカーから呼ばれ、ProposalPanel
+        側の既存UI（メッセージ欄）とは別チャネルのため、F4と同じ軽量な一時通知とする。
+        """
+        self.status_text.set(message)
+
     def _refresh_status_line(self) -> None:
-        """ステータス: ブック / シート / 範囲 / ライブ。"""
-        live_label = "ON" if self.preview_active else "OFF"
+        """ステータス: ブック / シート / 範囲 / ライブ。
+
+        「プレビュー中」であることの表示は、本体ボタンの色（緑）を使わず、
+        この常時表示ステータス行のテキスト＋末尾ドットの点滅で行う（構想設計§2-1。
+        新規タイマーは増やさず `_poll_excel_status` の既存ポーリングに便乗する）。
+        """
+        if self.preview_active:
+            self._live_tick = (self._live_tick + 1) % 4
+            live_label = "ON" + "." * self._live_tick
+        else:
+            live_label = "OFF"
         if self.is_processing:
+            return
+        if self._preview_timeout_active:
+            # F8: 無応答タイムアウトの案内文言を、Excel選択状態の定期更新で
+            # 上書きしない（構想設計§4。復帰は _cancel_preview / 再読込時）。
             return
         try:
             app = get_excel_app()
@@ -619,11 +718,11 @@ class FlowchartApp(ctk.CTk):
     def _update_preview_button_color(self, *, has_target: bool) -> None:
         """「表を読み込んでプレビュー」の色を状態で切り替える。
 
-        白=対象未検出 · 青=対象検出（未読込）· 緑=プレビュー中（読込済み）。
+        白=対象未検出 · 青=対象検出。緑（プリセット一致専用）との兼用を解消し、
+        「プレビュー中」は`_refresh_status_line`のライブ表示（テキスト）で示す
+        （構想設計§2-1）。
         """
-        if self.preview_active:
-            self.btn_preview.configure(**STYLE_PREVIEWING)
-        elif has_target:
+        if has_target:
             self.btn_preview.configure(**STYLE_PRIMARY)
         else:
             self.btn_preview.configure(**STYLE_WHITE)
@@ -758,7 +857,7 @@ class FlowchartApp(ctk.CTk):
             logger.warning(f"clear_canvas_failed | error={e}")
             messagebox.showerror("エラー", f"図面クリアに失敗しました: {e}")
 
-    def _apply_preset(self, p: Dict) -> None:
+    def _apply_preset(self, p: dict) -> None:
         """プリセット設定を適用する。
         
         Args:

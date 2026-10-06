@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, List, Optional
+from typing import Any
 
 import pythoncom
 import pywintypes
@@ -34,7 +34,7 @@ class WriteResult:
     updated_count: int = 0
     excluded_count: int = 0
     stale_topology: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _norm_id(value: Any) -> str:
@@ -44,8 +44,8 @@ def _norm_id(value: Any) -> str:
 
 
 def write_level_updates(
-    watch: Dict[str, Any],
-    proposals: List[LevelProposal],
+    watch: dict[str, Any],
+    proposals: list[LevelProposal],
     *,
     mode: ProposalMode,
     baseline: ProposalSnapshot,
@@ -70,7 +70,7 @@ def write_level_updates(
         if topology_changed(baseline, fresh):
             return WriteResult(ok=False, stale_topology=True)
 
-        excluded: FrozenSet[str] = (
+        excluded: frozenset[str] = (
             hand_edited_ids(baseline, fresh) if mode == "blank_only" else frozenset()
         )
         to_write = {p.node_id: p.proposed for p in proposals if p.node_id not in excluded}
@@ -83,45 +83,61 @@ def write_level_updates(
         if not app:
             return WriteResult(ok=False, error="Excelが起動していません。")
 
-        workbook = None
-        for wb in app.Workbooks:
-            if str(wb.Name) == str(watch.get("workbookName")):
-                workbook = wb
-                break
-        if workbook is None:
-            return WriteResult(ok=False, error="ブックが見つかりません。")
+        app.ScreenUpdating = False
+        app.DisplayAlerts = False
+        try:
+            workbook = None
+            for wb in app.Workbooks:
+                if str(wb.Name) == str(watch.get("workbookName")):
+                    workbook = wb
+                    break
+            if workbook is None:
+                return WriteResult(ok=False, error="ブックが見つかりません。")
 
-        sheet = workbook.Sheets(watch.get("sheetName"))
-        is_full = bool(watch.get("isFullMode"))
-        if is_full:
-            r_tgt = sheet.Range(watch["anchorAddress"]).CurrentRegion
-        else:
-            addr = watch.get("rangeAddress") or watch["anchorAddress"]
-            r_tgt = sheet.Range(addr)
+            sheet = workbook.Sheets(watch.get("sheetName"))
+            is_full = bool(watch.get("isFullMode"))
+            if is_full:
+                r_tgt = sheet.Range(watch["anchorAddress"]).CurrentRegion
+            else:
+                addr = watch.get("rangeAddress") or watch["anchorAddress"]
+                r_tgt = sheet.Range(addr)
 
-        row_count = len(data)
+            # 統一読み取り: ID列・level列を含む全列を1回のCOM呼び出し（r_tgt.Value）
+            # で取得し、行数(row_count)・id_to_row をこの読み取りから再導出する
+            # （①時点の`data`をそのまま使い回さない）。これにより、この後の実際の
+            # COM呼び出しは書き込み（level_range.Value = column）の1回のみになる
+            # （書き込み直前の2回目の読み取りを行わない。構想設計§1-1ステップ4）。
+            fresh_data = r_tgt.Value
+            if not fresh_data or not isinstance(fresh_data, tuple):
+                return WriteResult(ok=False, stale_topology=True)
 
-        # ID→行位置を直前の再読取結果から解決し直す（COM の Range 書き込みは
-        # 行位置ベースのため、書き込み直前に安全確認する TOCTOU 窓を塞ぐ保険）。
-        id_to_row: Dict[str, int] = {}
-        for idx, row in enumerate(data):
-            nid = _norm_id(row[0] if row else None)
-            if nid:
-                id_to_row[nid] = idx
+            row_count = len(fresh_data)
+            if int(r_tgt.Rows.Count) != row_count:
+                return WriteResult(ok=False, stale_topology=True)
 
-        if any(nid not in id_to_row for nid in to_write):
-            # ID再解決に失敗（行の移動・削除等）→ 区別①と同じ自動再計算フローに合流
-            return WriteResult(ok=False, stale_topology=True)
+            id_to_row: dict[str, int] = {}
+            for idx, row in enumerate(fresh_data):
+                nid = _norm_id(row[0] if row else None)
+                if nid:
+                    id_to_row[nid] = idx
 
-        level_range = r_tgt.Cells(1, LEVEL_COL + 1).Resize(row_count, 1)
-        current_values = level_range.Value
-        column: List[List[Any]] = (
-            [[current_values]] if row_count == 1 else [[row[0]] for row in current_values]
-        )
-        for nid, new_value in to_write.items():
-            column[id_to_row[nid]][0] = new_value
+            if frozenset(id_to_row.keys()) != fresh.ids:
+                # 鮮度チェック用の読み取り(fresh)からこの統一読み取りまでの間に
+                # ID集合が変化（行の追加・削除・並べ替え等）→ 区別①と同じ自動再計算
+                # フローに合流
+                return WriteResult(ok=False, stale_topology=True)
 
-        level_range.Value = column
+            level_range = r_tgt.Cells(1, LEVEL_COL + 1).Resize(row_count, 1)
+            column: list[list[Any]] = [
+                [row[LEVEL_COL] if len(row) > LEVEL_COL else None] for row in fresh_data
+            ]
+            for nid, new_value in to_write.items():
+                column[id_to_row[nid]][0] = new_value
+
+            level_range.Value = column
+        finally:
+            app.ScreenUpdating = True
+            app.DisplayAlerts = True
     except (pywintypes.com_error, AttributeError, RuntimeError) as exc:
         logger.exception("level_update_write_failed")
         return WriteResult(ok=False, error=f"更新に失敗しました: {exc}")

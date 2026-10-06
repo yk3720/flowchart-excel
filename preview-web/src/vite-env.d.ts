@@ -33,8 +33,9 @@ export type FlowchartValidationState = {
 };
 
 // C-2: 「提案」タブ（段・列の自動計算・提案機能）の JS↔Python ポーリングブリッジ型。
-// scope は "level"（C-2・実装済み）/ "tier"（C-3・未実装）を多重化できるよう最初から持つ。
-export type ProposalScope = "level" | "tier";
+// scope は "level"（C-2・実装済み）/ "id"（F5・ID自動採番・実装済み）/
+// "tier"（C-3・未実装）を多重化できるよう最初から持つ。
+export type ProposalScope = "level" | "id" | "tier";
 export type ProposalMode = "blank_only" | "full_recalc";
 export type ProposalActionKind = "compute" | "update" | "cancel";
 
@@ -45,10 +46,12 @@ export type ProposalActionRequest = {
   mode: ProposalMode;
 };
 
+// LevelProposal は C-2（段・列）由来の名称だが、ProposalPanel が scope="id"（F5）でも
+// 流用するため current/proposed は string（IDは文字列）も受け付ける。
 export type LevelProposal = {
   nodeId: string;
-  current: number | null;
-  proposed: number;
+  current: number | string | null;
+  proposed: number | string;
   reason: string;
 };
 

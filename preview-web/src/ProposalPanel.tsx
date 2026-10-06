@@ -109,21 +109,27 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
   }, [scope, mode]);
 
   const isBusy = status === "computing" || status === "updating";
-  const isFullRecalc = mode === "full_recalc";
+  const isUpdating = status === "updating";
+  // 全部再計算モードはlevel（列・段）の提案専用。idスコープ（F5・ID自動採番）は
+  // 対象が常に新規行（ID空欄）のみのため、このモード自体が存在しない。
+  const supportsFullRecalc = scope === "level";
+  const isFullRecalc = supportsFullRecalc && mode === "full_recalc";
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-flow-surface-muted">
       <div className="shrink-0 border-b border-flow-border bg-flow-surface px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm font-bold text-flow-text">{targetLabel}の提案・更新</div>
-          <label className="flex items-center gap-1.5 text-xs text-flow-text-muted">
-            <input
-              type="checkbox"
-              checked={isFullRecalc}
-              onChange={(e) => setMode(e.target.checked ? "full_recalc" : "blank_only")}
-            />
-            全部再計算（既存値も上書き対象にします）
-          </label>
+          {supportsFullRecalc ? (
+            <label className="flex items-center gap-1.5 text-xs text-flow-text-muted">
+              <input
+                type="checkbox"
+                checked={isFullRecalc}
+                onChange={(e) => setMode(e.target.checked ? "full_recalc" : "blank_only")}
+              />
+              全部再計算（既存値も上書き対象にします）
+            </label>
+          ) : null}
         </div>
         <p className="mt-1 text-xs text-flow-text-muted">
           「提案の計算」は Excel のセルを一切変更しません。内容を確認し「更新」を押した場合だけ書き込まれます。
@@ -136,28 +142,35 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
             <span>{status === "computing" ? "計算中…" : "更新中…"}</span>
             <button
               type="button"
-              className="rounded border border-flow-border px-2 py-0.5 text-xs hover:bg-flow-surface-subtle"
+              className="rounded border border-flow-border px-2 py-0.5 text-xs hover:bg-flow-surface-subtle disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              disabled={isUpdating}
+              title={isUpdating ? "書き込み中のため中断できません（まもなく完了します）" : undefined}
               onClick={handleCancel}
             >
               キャンセル
             </button>
+            {isUpdating ? (
+              <span className="text-xs text-flow-text-muted">
+                書き込み中のため中断できません（まもなく完了します）
+              </span>
+            ) : null}
           </div>
         ) : null}
 
         {errorText ? (
-          <div className="mb-3 rounded-md border border-flow-danger-border bg-flow-danger-muted px-3 py-2 text-xs text-flow-danger-text">
+          <div className="mb-3 rounded-md border border-flow-proposal-border bg-flow-proposal-bg px-3 py-2 text-xs font-semibold text-flow-proposal-text">
             {errorText}
           </div>
         ) : null}
 
         {message ? (
-          <div className="mb-3 rounded-md border border-flow-accent-muted-border bg-flow-accent-muted px-3 py-2 text-xs text-flow-accent-muted-text">
+          <div className="mb-3 rounded-md border border-flow-proposal-border bg-flow-proposal-bg px-3 py-2 text-xs text-flow-proposal-text">
             {message}
           </div>
         ) : null}
 
         {isFullRecalc ? (
-          <div className="mb-3 rounded-md border border-flow-warning-border-strong bg-flow-warning-bg px-3 py-2 text-xs text-flow-warning-text">
+          <div className="mb-3 rounded-md border border-flow-proposal-border bg-flow-proposal-bg px-3 py-2 text-xs text-flow-proposal-text">
             全部再計算モードでは、手入力した値も上書き対象になります。
           </div>
         ) : null}
@@ -166,7 +179,7 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
           <table className="w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-flow-border text-left text-flow-text-muted">
-                <th className="py-1 pr-2 font-medium">ID</th>
+                <th className="py-1 pr-2 font-medium">{scope === "id" ? "対象行" : "ID"}</th>
                 <th className="py-1 pr-2 font-medium">現在値</th>
                 <th className="py-1 pr-2 font-medium">提案値</th>
                 <th className="py-1 font-medium">根拠</th>
@@ -193,9 +206,9 @@ export function ProposalPanel({ scope = "level", targetLabel = "列" }: Proposal
           <div className="mt-4">
             <div className="mb-1 text-xs font-bold text-flow-text">要確認</div>
             <ul className="space-y-1 text-xs text-flow-text-muted">
-              {needsReview.map((item) => (
-                <li key={item.nodeId}>
-                  行{item.nodeId}: {item.reason}
+              {needsReview.map((item, idx) => (
+                <li key={`${item.nodeId}-${idx}`}>
+                  {item.nodeId === "-" ? item.reason : `行${item.nodeId}: ${item.reason}`}
                 </li>
               ))}
             </ul>
